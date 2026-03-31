@@ -1,8 +1,8 @@
 """
-🤖_AI_Analytics.py — Pagina AI Pulseway Analytics (multi-pagina Streamlit).
+AI_Analytics.py — Pagina AI Pulseway Analytics (multi-pagina Streamlit).
 Analisi anomalie e pattern con Claude API.
 
-Avvio: python -m streamlit run "🎫_Dashboard.py" (la sidebar apre questa pagina)
+Avvio: python -m streamlit run app.py (la sidebar apre questa pagina)
 """
 
 import pandas as pd

@@ -1,6 +1,6 @@
 """
-🎫_Dashboard.py — Dashboard Pulseway Analytics con Streamlit + PostgreSQL.
-Avvio locale: python -m streamlit run "🎫_Dashboard.py"
+app.py — Dashboard Pulseway Analytics con Streamlit + PostgreSQL.
+Avvio locale: python -m streamlit run app.py
 Su Railway:   viene avviato automaticamente (Procfile)
 """
 
