@@ -1,25 +1,28 @@
-# ============================================================
-# config.py — Configurazione tramite variabili d'ambiente
-# Su Railway le variabili si impostano nella dashboard.
-# In locale crea un file .env nella stessa cartella.
-# ============================================================
-
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # Carica .env in locale (ignorato su Railway)
+load_dotenv()  # Funziona in locale
+
+def _get(key: str, default: str = "") -> str:
+    """Legge da st.secrets (Streamlit Cloud) o os.environ (locale/Railway)."""
+    try:
+        import streamlit as st
+        return st.secrets.get(key, os.environ.get(key, default))
+    except Exception:
+        return os.environ.get(key, default)
 
 # --- Pulseway PSA ---
-SERVER_URL = os.environ.get("PULSEWAY_SERVER_URL", "api.psa.pulseway.com")
-USERNAME   = os.environ.get("PULSEWAY_USERNAME",   "powerbi")
-PASSWORD   = os.environ.get("PULSEWAY_PASSWORD",   "Yotta2024-")
-TENANT     = os.environ.get("PULSEWAY_TENANT",     "YottaCore")
+SERVER_URL = _get("PULSEWAY_SERVER_URL", "api.psa.pulseway.com")
+USERNAME   = _get("PULSEWAY_USERNAME",   "powerbi")
+PASSWORD   = _get("PULSEWAY_PASSWORD",   "Yotta2024-")
+TENANT     = _get("PULSEWAY_TENANT",     "YottaCore")
 
-# --- PostgreSQL (Railway lo inietta automaticamente come DATABASE_URL) ---
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# --- PostgreSQL ---
+DATABASE_URL = _get("DATABASE_URL")
 
 # --- Paginazione ---
-PAGE_SIZE = int(os.environ.get("PAGE_SIZE", "100"))
+PAGE_SIZE = int(_get("PAGE_SIZE", "100"))
 
-# --- Dashboard auth (opzionale) ---
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
+# --- Dashboard ---
+DASHBOARD_PASSWORD = _get("DASHBOARD_PASSWORD")
+ANTHROPIC_API_KEY  = _get("ANTHROPIC_API_KEY")
