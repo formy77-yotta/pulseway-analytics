@@ -1,6 +1,6 @@
 """
-dashboard.py — Dashboard Pulseway Analytics con Streamlit + PostgreSQL.
-Avvio locale: streamlit run dashboard.py
+🎫_Dashboard.py — Dashboard Pulseway Analytics con Streamlit + PostgreSQL.
+Avvio locale: python -m streamlit run "🎫_Dashboard.py"
 Su Railway:   viene avviato automaticamente (Procfile)
 """
 
@@ -8,15 +8,16 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 from sqlalchemy import create_engine
-from config import DATABASE_URL, DASHBOARD_PASSWORD
+from config import DATABASE_URL, DASHBOARD_PASSWORD, ANTHROPIC_API_KEY
 
 # ------------------------------------------------------------------
-# Configurazione pagina
+# Configurazione pagina (solo file principale multi-pagina)
 # ------------------------------------------------------------------
 st.set_page_config(
     page_title="Pulseway PSA Analytics",
     page_icon="🎫",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # ------------------------------------------------------------------

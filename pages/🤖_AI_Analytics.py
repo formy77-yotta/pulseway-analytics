@@ -1,28 +1,17 @@
 """
-dashboard_ai.py — Dashboard AI Pulseway Analytics.
+🤖_AI_Analytics.py — Pagina AI Pulseway Analytics (multi-pagina Streamlit).
 Analisi anomalie e pattern con Claude API.
 
-Avvio: python -m streamlit run dashboard_ai.py
+Avvio: python -m streamlit run "🎫_Dashboard.py" (la sidebar apre questa pagina)
 """
 
-import json
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 from sqlalchemy import create_engine
 from datetime import datetime, timedelta
 import requests
-from config import DATABASE_URL, DASHBOARD_PASSWORD
-
-# ------------------------------------------------------------------
-# Configurazione pagina
-# ------------------------------------------------------------------
-st.set_page_config(
-    page_title="Pulseway AI Analytics",
-    page_icon="🤖",
-    layout="wide",
-)
+from config import DATABASE_URL, DASHBOARD_PASSWORD, ANTHROPIC_API_KEY
 
 if DASHBOARD_PASSWORD:
     pwd = st.sidebar.text_input("🔑 Password", type="password")
@@ -93,9 +82,13 @@ def ask_claude(prompt: str, context_data: str) -> str:
     try:
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": ANTHROPIC_API_KEY,          # ← aggiungi questa
+                "anthropic-version": "2023-06-01",        # ← e questa
+            },
             json={
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-4-6",
                 "max_tokens": 1000,
                 "system": (
                     "Sei un analista esperto di service desk IT. "
