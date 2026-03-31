@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     hardware_asset_id           INTEGER,
     hardware_asset_name         TEXT,
     custom_fields               TEXT,
+    custom_contatto_diretto     TEXT,
+    custom_fuori_orario         TEXT,
 
     -- Metadata sync
     synced_at                   TIMESTAMPTZ DEFAULT NOW()
@@ -152,6 +154,7 @@ INSERT INTO tickets (
     source_id, contract_id, contract_name,
     work_type_id, work_type_name,
     is_scheduled, hardware_asset_id, hardware_asset_name, custom_fields,
+    custom_contatto_diretto, custom_fuori_orario,
     synced_at
 ) VALUES (
     %(id)s, %(ticket_number)s, %(title)s, %(details)s,
@@ -171,6 +174,7 @@ INSERT INTO tickets (
     %(source_id)s, %(contract_id)s, %(contract_name)s,
     %(work_type_id)s, %(work_type_name)s,
     %(is_scheduled)s, %(hardware_asset_id)s, %(hardware_asset_name)s, %(custom_fields)s,
+    %(custom_contatto_diretto)s, %(custom_fuori_orario)s,
     NOW()
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -189,12 +193,50 @@ ON CONFLICT (id) DO UPDATE SET
     actual_first_response_min  = EXCLUDED.actual_first_response_min,
     actual_resolution_min      = EXCLUDED.actual_resolution_min,
     actual_pause_min           = EXCLUDED.actual_pause_min,
+    biz_minutes_first_response = EXCLUDED.biz_minutes_first_response,
+    biz_hours_first_response   = EXCLUDED.biz_hours_first_response,
+    biz_minutes_resolution     = EXCLUDED.biz_minutes_resolution,
+    biz_hours_resolution       = EXCLUDED.biz_hours_resolution,
+    custom_contatto_diretto    = EXCLUDED.custom_contatto_diretto,
+    custom_fuori_orario        = EXCLUDED.custom_fuori_orario,
     synced_at                  = NOW();
 """
 
 
+def _parse_custom(custom_fields_str, key: str):
+    """Estrae un valore dal JSON dei custom fields."""
+    if not custom_fields_str:
+        return None
+    try:
+        import json
+        data = json.loads(custom_fields_str)
+        return data.get(key)
+    except Exception:
+        return None
+
+
 def _map_ticket(t: dict) -> dict:
-    """Mappa i campi API (camelCase) ai campi del DB (snake_case)."""
+    """Mappa campi API (camelCase) → colonne DB (snake_case)."""
+    from datetime import datetime
+    from business_hours import business_minutes
+
+    def parse_dt(val):
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val
+        try:
+            return datetime.fromisoformat(str(val).replace("Z", ""))
+        except Exception:
+            return None
+
+    open_date  = parse_dt(t.get("openDate"))
+    first_resp = parse_dt(t.get("firstResponseActualTime"))
+    resolution = parse_dt(t.get("resolutionActualTime"))
+
+    biz_first = business_minutes(open_date, first_resp)
+    biz_res   = business_minutes(open_date, resolution)
+
     return {
         "id":                           t.get("id"),
         "ticket_number":                t.get("ticketNumber"),
@@ -251,12 +293,17 @@ def _map_ticket(t: dict) -> dict:
         "hardware_asset_id":            t.get("hardwareAssetId"),
         "hardware_asset_name":          t.get("hardwareAssetName"),
         "custom_fields":                t.get("customFields"),
+        "custom_contatto_diretto":      _parse_custom(t.get("customFields"), "cf_3208"),
+        "custom_fuori_orario":          _parse_custom(t.get("customFields"), "cf_3209"),
+        "biz_minutes_first_response":   biz_first,
+        "biz_hours_first_response":     round(biz_first / 60, 2) if biz_first is not None else None,
+        "biz_minutes_resolution":       biz_res,
+        "biz_hours_resolution":         round(biz_res / 60, 2) if biz_res is not None else None,
     }
 
 
 def upsert_tickets(tickets: list[dict]):
     rows = [_map_ticket(t) for t in tickets]
-    # Filtra righe senza ID valido
     rows = [r for r in rows if r.get("id") is not None]
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -270,7 +317,9 @@ def get_ticket_count() -> int:
             cur.execute("SELECT COUNT(*) FROM tickets")
             return cur.fetchone()[0]
 
+
 def delete_removed_tickets(remote_ids: set, from_date: str) -> int:
+    """Elimina dal DB i ticket che non esistono più su Pulseway."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -278,10 +327,7 @@ def delete_removed_tickets(remote_ids: set, from_date: str) -> int:
                 (from_date,)
             )
             local_ids = {row[0] for row in cur.fetchall()}
-            print(f"DEBUG - local_ids esempio: {list(local_ids)[:5]}")
-            print(f"DEBUG - tipo ID locale: {type(list(local_ids)[0]) if local_ids else 'VUOTO'}")
             to_delete = local_ids - remote_ids
-            print(f"DEBUG - to_delete count: {len(to_delete)}")
             if to_delete:
                 cur.execute(
                     "DELETE FROM tickets WHERE id = ANY(%s)",
