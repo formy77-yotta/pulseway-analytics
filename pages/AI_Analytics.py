@@ -13,11 +13,8 @@ from datetime import datetime, timedelta
 import requests
 from config import DATABASE_URL, DASHBOARD_PASSWORD, ANTHROPIC_API_KEY
 
-if DASHBOARD_PASSWORD:
-    pwd = st.sidebar.text_input("🔑 Password", type="password")
-    if pwd != DASHBOARD_PASSWORD:
-        st.warning("Inserisci la password per accedere.")
-        st.stop()
+from auth import check_auth
+check_auth()
 
 st.title("🤖 Pulseway PSA — AI Analytics")
 st.caption("Analisi anomalie e pattern nascosti powered by Claude AI")

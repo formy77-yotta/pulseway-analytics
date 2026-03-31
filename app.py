@@ -23,11 +23,9 @@ st.set_page_config(
 # ------------------------------------------------------------------
 # Password opzionale
 # ------------------------------------------------------------------
-if DASHBOARD_PASSWORD:
-    pwd = st.sidebar.text_input("🔑 Password", type="password")
-    if pwd != DASHBOARD_PASSWORD:
-        st.warning("Inserisci la password per accedere alla dashboard.")
-        st.stop()
+from auth import check_auth
+# rimuovi il vecchio blocco if DASHBOARD_PASSWORD...
+check_auth()
 
 st.title("🎫 Pulseway PSA — Analisi Ticket")
 
