@@ -94,6 +94,10 @@ sel_prio   = st.sidebar.multiselect("Priorità", priorities, default=[])
 statuses   = sorted(df["status_name"].dropna().unique().tolist())
 sel_status = st.sidebar.multiselect("Stato", statuses, default=[])
 
+# Filtro coda
+queues = sorted(df["queue_name"].dropna().unique().tolist())
+sel_queue = st.sidebar.multiselect("Coda", queues, default=[])
+
 # Applica filtri
 f = df.copy()
 if len(date_range) == 2:
@@ -102,6 +106,7 @@ if sel_acc   != "Tutti":  f = f[f["account_name"]  == sel_acc]
 if sel_tech  != "Tutti":  f = f[f["assignee_name"] == sel_tech]
 if sel_prio:              f = f[f["priority_name"].isin(sel_prio)]
 if sel_status:            f = f[f["status_name"].isin(sel_status)]
+if sel_queue:             f = f[f["queue_name"].isin(sel_queue)]
 
 # ------------------------------------------------------------------
 # KPI
@@ -222,6 +227,55 @@ with ch:
                   color="SLA", color_discrete_map={"✅ Rispettato":"#00cc96","❌ Violato":"#ef553b"})
     fig8.update_layout(height=400, margin=dict(t=10,b=10))
     st.plotly_chart(fig8, use_container_width=True)
+    
+# ------------------------------------------------------------------
+# Contatto Diretto & Fuori Orario
+# ------------------------------------------------------------------
+if "custom_contatto_diretto" in f.columns and "custom_fuori_orario" in f.columns:
+    st.subheader("📞 Contatto Diretto & Fuori Orario")
+    ck, cl = st.columns(2)
+
+    with ck:
+        cd = f["custom_contatto_diretto"].value_counts().reset_index()
+        cd.columns = ["Valore", "N"]
+        fig_cd = px.pie(cd, values="N", names="Valore", hole=0.4,
+                        title="Contatto Diretto",
+                        color_discrete_sequence=["#636efa","#ef553b","#d3d3d3"])
+        fig_cd.update_layout(height=320, margin=dict(t=30,b=10))
+        st.plotly_chart(fig_cd, use_container_width=True)
+
+    with cl:
+        fo = f["custom_fuori_orario"].value_counts().reset_index()
+        fo.columns = ["Valore", "N"]
+        fig_fo = px.pie(fo, values="N", names="Valore", hole=0.4,
+                        title="Richiesta Fuori Orario",
+                        color_discrete_sequence=["#ef553b","#636efa","#d3d3d3"])
+        fig_fo.update_layout(height=320, margin=dict(t=30,b=10))
+        st.plotly_chart(fig_fo, use_container_width=True)
+
+    # Barre per cliente
+    by_acc_cf = f.groupby("account_name").agg(
+        contatto_diretto=("custom_contatto_diretto", lambda x: (x=="Yes").sum()),
+        fuori_orario=("custom_fuori_orario", lambda x: (x=="Yes").sum()),
+    ).reset_index()
+    by_acc_cf = by_acc_cf[
+        (by_acc_cf["contatto_diretto"] > 0) | (by_acc_cf["fuori_orario"] > 0)
+    ].sort_values("contatto_diretto", ascending=False).head(15)
+
+    if not by_acc_cf.empty:
+        fig_acc = px.bar(
+            by_acc_cf, x="account_name",
+            y=["contatto_diretto", "fuori_orario"],
+            barmode="group",
+            title="Contatto diretto e fuori orario per cliente",
+            labels={"value":"N° Ticket","account_name":"Cliente","variable":""},
+            color_discrete_map={"contatto_diretto":"#636efa","fuori_orario":"#ef553b"},
+        )
+        fig_acc.update_layout(height=360, margin=dict(t=30,b=80))
+        fig_acc.update_xaxes(tickangle=30)
+        st.plotly_chart(fig_acc, use_container_width=True)
+
+    st.divider()
 
 # ------------------------------------------------------------------
 # Distribuzione tempi

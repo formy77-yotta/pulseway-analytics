@@ -38,8 +38,6 @@ def sync(days: int = None):
     # Riconciliazione
     if not days:
         remote_ids = {t["id"] for t in tickets if t.get("id")}
-        print(f"DEBUG - remote_ids esempio: {list(remote_ids)[:5]}")
-        print(f"DEBUG - tipo ID remoto: {type(list(remote_ids)[0])}")
         deleted = delete_removed_tickets(remote_ids, from_date="2025-01-01T00:00:00")
         if deleted:
             logger.info(f"🗑️ Rimossi {deleted} ticket eliminati da Pulseway.")
