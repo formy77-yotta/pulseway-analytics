@@ -194,68 +194,70 @@ ON CONFLICT (id) DO UPDATE SET
 
 
 def _map_ticket(t: dict) -> dict:
-    """Mappa campi API (PascalCase) → colonne DB (snake_case)."""
+    """Mappa i campi API (camelCase) ai campi del DB (snake_case)."""
     return {
-        "id":                           t.get("Id"),
-        "ticket_number":                t.get("TicketNumber"),
-        "title":                        t.get("Title"),
-        "details":                      t.get("Details"),
-        "account_id":                   t.get("AccountId"),
-        "account_name":                 t.get("AccountName"),
-        "account_code":                 t.get("AccountCode"),
-        "location_id":                  t.get("LocationId"),
-        "location_name":                t.get("LocationName"),
-        "contact_id":                   t.get("ContactId"),
-        "contact_name":                 t.get("ContactName"),
-        "assignee_id":                  t.get("AssigneeId"),
-        "assignee_name":                t.get("AssigneeName"),
-        "status_id":                    t.get("StatusId"),
-        "status_name":                  t.get("StatusName"),
-        "priority_id":                  t.get("PriorityId"),
-        "priority_name":                t.get("PriorityName"),
-        "type_id":                      t.get("TypeId"),
-        "type_name":                    t.get("TypeName"),
-        "issue_type_id":                t.get("IssueTypeId"),
-        "issue_type_name":              t.get("IssueTypeName"),
-        "sub_issue_type_id":            t.get("SubIssueTypeId"),
-        "sub_issue_type_name":          t.get("SubIssueTypeName"),
-        "queue_id":                     t.get("QueueId"),
-        "queue_name":                   t.get("QueueName"),
-        "open_date":                    t.get("OpenDate"),
-        "due_date":                     t.get("DueDate"),
-        "completed_date":               t.get("CompletedDate"),
-        "re_opened_date":               t.get("ReOpenedDate"),
-        "created_on":                   t.get("CreatedOn"),
-        "modified_on":                  t.get("ModifiedOn"),
-        "last_activity_update":         t.get("LastActivityUpdate"),
-        "last_status_update":           t.get("LastStatusUpdate"),
-        "last_priority_update":         t.get("LastPriorityUpdate"),
-        "sla_id":                       t.get("SLAId"),
-        "sla_name":                     t.get("SLAName"),
-        "has_met_sla":                  t.get("HasMetSLA"),
-        "sla_status_enum":              t.get("SLAStatusEnum"),
-        "is_sla_paused":                t.get("IsSLAPaused"),
-        "first_response_target_time":   t.get("FirstResponseTargetTime"),
-        "first_response_actual_time":   t.get("FirstResponseActualTime"),
-        "resolution_target_time":       t.get("ResolutionTargetTime"),
-        "resolution_actual_time":       t.get("ResolutionActualTime"),
-        "actual_first_response_min":    t.get("ActualFirstResponseMinutes"),
-        "actual_resolution_min":        t.get("ActualResolutionMinutes"),
-        "actual_pause_min":             t.get("ActualPauseMinutes"),
-        "source_id":                    t.get("SourceId"),
-        "contract_id":                  t.get("ContractId"),
-        "contract_name":                t.get("ContractName"),
-        "work_type_id":                 t.get("WorkTypeId"),
-        "work_type_name":               t.get("WorkTypeName"),
-        "is_scheduled":                 t.get("IsScheduled"),
-        "hardware_asset_id":            t.get("HardwareAssetId"),
-        "hardware_asset_name":          t.get("HardwareAssetName"),
-        "custom_fields":                t.get("CustomFields"),
+        "id":                           t.get("id"),
+        "ticket_number":                t.get("ticketNumber"),
+        "title":                        t.get("title"),
+        "details":                      t.get("details"),
+        "account_id":                   t.get("accountId"),
+        "account_name":                 t.get("accountName"),
+        "account_code":                 t.get("accountCode"),
+        "location_id":                  t.get("locationId"),
+        "location_name":                t.get("locationName"),
+        "contact_id":                   t.get("contactId"),
+        "contact_name":                 t.get("contactName"),
+        "assignee_id":                  t.get("assigneeId"),
+        "assignee_name":                t.get("assigneeName"),
+        "status_id":                    t.get("statusId"),
+        "status_name":                  t.get("statusName"),
+        "priority_id":                  t.get("priorityId"),
+        "priority_name":                t.get("priorityName"),
+        "type_id":                      t.get("typeId"),
+        "type_name":                    t.get("typeName"),
+        "issue_type_id":                t.get("issueTypeId"),
+        "issue_type_name":              t.get("issueTypeName"),
+        "sub_issue_type_id":            t.get("subIssueTypeId"),
+        "sub_issue_type_name":          t.get("subIssueTypeName"),
+        "queue_id":                     t.get("queueId"),
+        "queue_name":                   t.get("queueName"),
+        "open_date":                    t.get("openDate"),
+        "due_date":                     t.get("dueDate"),
+        "completed_date":               t.get("completedDate"),
+        "re_opened_date":               t.get("reOpenedDate"),
+        "created_on":                   t.get("createdOn"),
+        "modified_on":                  t.get("modifiedOn"),
+        "last_activity_update":         t.get("lastActivityUpdate"),
+        "last_status_update":           t.get("lastStatusUpdate"),
+        "last_priority_update":         t.get("lastPriorityUpdate"),
+        "sla_id":                       t.get("slaId"),
+        "sla_name":                     t.get("slaName"),
+        "has_met_sla":                  t.get("hasMetSLA"),
+        "sla_status_enum":              t.get("slaStatusEnum"),
+        "is_sla_paused":                t.get("isSLAPaused"),
+        "first_response_target_time":   t.get("firstResponseTargetTime"),
+        "first_response_actual_time":   t.get("firstResponseActualTime"),
+        "resolution_target_time":       t.get("resolutionTargetTime"),
+        "resolution_actual_time":       t.get("resolutionActualTime"),
+        "actual_first_response_min":    t.get("actualFirstResponseMinutes"),
+        "actual_resolution_min":        t.get("actualResolutionMinutes"),
+        "actual_pause_min":             t.get("actualPauseMinutes"),
+        "source_id":                    t.get("sourceId"),
+        "contract_id":                  t.get("contractId"),
+        "contract_name":                t.get("contractName"),
+        "work_type_id":                 t.get("workTypeId"),
+        "work_type_name":               t.get("workTypeName"),
+        "is_scheduled":                 t.get("isScheduled"),
+        "hardware_asset_id":            t.get("hardwareAssetId"),
+        "hardware_asset_name":          t.get("hardwareAssetName"),
+        "custom_fields":                t.get("customFields"),
     }
 
 
 def upsert_tickets(tickets: list[dict]):
     rows = [_map_ticket(t) for t in tickets]
+    # Filtra righe senza ID valido
+    rows = [r for r in rows if r.get("id") is not None]
     with get_conn() as conn:
         with conn.cursor() as cur:
             psycopg2.extras.execute_batch(cur, UPSERT_TICKET, rows, page_size=200)
@@ -267,3 +269,23 @@ def get_ticket_count() -> int:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM tickets")
             return cur.fetchone()[0]
+
+def delete_removed_tickets(remote_ids: set, from_date: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM tickets WHERE open_date >= %s::timestamptz",
+                (from_date,)
+            )
+            local_ids = {row[0] for row in cur.fetchall()}
+            print(f"DEBUG - local_ids esempio: {list(local_ids)[:5]}")
+            print(f"DEBUG - tipo ID locale: {type(list(local_ids)[0]) if local_ids else 'VUOTO'}")
+            to_delete = local_ids - remote_ids
+            print(f"DEBUG - to_delete count: {len(to_delete)}")
+            if to_delete:
+                cur.execute(
+                    "DELETE FROM tickets WHERE id = ANY(%s)",
+                    (list(to_delete),)
+                )
+                return len(to_delete)
+    return 0
