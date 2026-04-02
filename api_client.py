@@ -211,11 +211,15 @@ class PulsewayClient:
         Crea un nuovo ticket su Pulseway.
         priority_id: 1=Low 2=Medium 3=High 4=Critical
         """
+        from datetime import datetime, timezone
         payload = {
             "AccountId":  int(account_id),
             "Title":      str(title),
             "Details":    str(description or title),
             "PriorityId": int(priority_id or 2),
+            "TypeId":     8,  # Incident (default)
+            "StatusId":   1,  # Nuovo
+            "OpenDate":   datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         }
         if contact_id:  payload["ContactId"]  = int(contact_id)
         if location_id: payload["LocationId"] = int(location_id)
