@@ -47,6 +47,20 @@ class PulsewayClient:
         resp.raise_for_status()
         return resp.json()
 
+    def _post(self, path: str, body: dict = None):
+        url = f"{self.base_url}{path}"
+        resp = requests.post(url, headers=self._headers(), json=body, timeout=30)
+        if resp.status_code == 401:
+            logger.warning("Token scaduto, rinnovo...")
+            self._authenticate()
+            resp = requests.post(url, headers=self._headers(), json=body, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # TICKETS — usato da sync.py
+    # ------------------------------------------------------------------
+
     def get_all_tickets(self, extra_filters: dict = None) -> list[dict]:
         """Scarica tutti i ticket con paginazione automatica."""
         all_tickets = []
@@ -74,3 +88,141 @@ class PulsewayClient:
 
         logger.success(f"Download completato: {len(all_tickets)} ticket.")
         return all_tickets
+
+    # ------------------------------------------------------------------
+    # CONTATTI — usato dal voicebot
+    # ------------------------------------------------------------------
+
+    def lookup_contact(self, name: str = None, email: str = None) -> dict | None:
+        """
+        Cerca un contatto per nome o email.
+        Restituisce il primo risultato trovato, o None se non trovato.
+        """
+        contacts = []
+
+        # Prima prova per email (più precisa)
+        if email:
+            data = self._get("/v2/crm/contacts/search/select", params={
+                "Filter.Email": email,
+                "PageSize": 5,
+            })
+            contacts = data.get("result", []) or []
+
+        # Se non trovato per email, cerca per nome
+        if not contacts and name:
+            parts = name.strip().split()
+            params = {"PageSize": 10}
+            if parts:
+                params["Filter.FirstName"] = parts[0]
+            if len(parts) > 1:
+                params["Filter.LastName"] = " ".join(parts[1:])
+            data = self._get("/v2/crm/contacts/search/select", params=params)
+            contacts = data.get("result", []) or []
+
+        if not contacts:
+            return None
+
+        c = contacts[0]
+        return {
+            "contactId":    c.get("id"),
+            "accountId":    c.get("accountId"),
+            "accountName":  c.get("accountName"),
+            "firstName":    c.get("firstName"),
+            "lastName":     c.get("lastName"),
+            "fullName":     f"{c.get('firstName', '')} {c.get('lastName', '')}".strip(),
+            "email":        c.get("emailAddress"),
+            "jobTitle":     c.get("jobTitle"),
+            "locationId":   c.get("locationId"),
+            "locationName": c.get("locationName"),
+        }
+
+    # ------------------------------------------------------------------
+    # TICKET APERTI — usato dal voicebot
+    # ------------------------------------------------------------------
+
+    def get_open_tickets_by_account(self, account_id: int, max_results: int = 5) -> list[dict]:
+        """Restituisce i ticket aperti (non completati) di un'azienda."""
+        data = self._post("/v2/servicedesk/tickets/search", {
+            "Filter": {
+                "AccountIds": [account_id],
+                "ExcludeCompleted": 1,
+            },
+            "PageSize": max_results,
+            "PageNumber": 1,
+        })
+        tickets = data.get("result", []) or []
+        return [
+            {
+                "ticketId":     t.get("id"),
+                "ticketNumber": t.get("ticketNumber"),
+                "title":        t.get("title"),
+                "status":       t.get("statusName"),
+                "priority":     t.get("priorityName"),
+                "openDate":     t.get("openDate"),
+            }
+            for t in tickets
+        ]
+
+    # ------------------------------------------------------------------
+    # CREA TICKET — usato dal voicebot
+    # ------------------------------------------------------------------
+
+    def create_ticket(
+        self,
+        account_id: int,
+        title: str,
+        description: str = None,
+        contact_id: int = None,
+        location_id: int = None,
+        priority_id: int = 2,
+        type_id: int = None,
+        queue_id: int = None,
+    ) -> dict:
+        """
+        Crea un nuovo ticket su Pulseway.
+        priority_id: 1=Low 2=Medium 3=High 4=Critical
+        """
+        payload = {
+            "AccountId":  account_id,
+            "Title":      title,
+            "Details":    description or title,
+            "PriorityId": priority_id,
+        }
+        if contact_id:  payload["ContactId"]  = contact_id
+        if location_id: payload["LocationId"] = location_id
+        if type_id:     payload["TypeId"]     = type_id
+        if queue_id:    payload["QueueId"]    = queue_id
+
+        data = self._post("/v2/servicedesk/tickets", payload)
+
+        if not data.get("success"):
+            msg = data.get("error", {}).get("message", "Errore sconosciuto")
+            raise RuntimeError(f"Pulseway create_ticket error: {msg}")
+
+        result = data["result"]
+        return {
+            "ticketId":     result.get("id"),
+            "ticketNumber": result.get("ticketNumber"),
+            "title":        result.get("title"),
+        }
+
+    # ------------------------------------------------------------------
+    # INFO ACCOUNT — usato dal voicebot
+    # ------------------------------------------------------------------
+
+    def get_account_info(self, account_id: int) -> dict | None:
+        """Restituisce le info di riepilogo di un'azienda."""
+        try:
+            data = self._get(f"/v2/crm/accounts/{account_id}/summaryinfo")
+            acc = data.get("result", {})
+            return {
+                "accountId": acc.get("id"),
+                "name":      acc.get("name"),
+                "phone":     acc.get("phone"),
+                "email":     acc.get("email"),
+                "status":    acc.get("statusName"),
+                "type":      acc.get("typeName"),
+            }
+        except Exception as e:
+            logger.warning(f"get_account_info({account_id}) fallito: {e}")
+            return None
