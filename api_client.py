@@ -54,6 +54,8 @@ class PulsewayClient:
             logger.warning("Token scaduto, rinnovo...")
             self._authenticate()
             resp = requests.post(url, headers=self._headers(), json=body, timeout=30)
+        if not resp.ok:
+            logger.error(f"HTTP {resp.status_code} su {path}: {resp.text}")
         resp.raise_for_status()
         return resp.json()
 
