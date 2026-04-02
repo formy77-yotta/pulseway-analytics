@@ -212,17 +212,19 @@ class PulsewayClient:
         priority_id: 1=Low 2=Medium 3=High 4=Critical
         """
         payload = {
-            "AccountId":  account_id,
-            "Title":      title,
-            "Details":    description or title,
-            "PriorityId": priority_id,
+            "AccountId":  int(account_id),
+            "Title":      str(title),
+            "Details":    str(description or title),
+            "PriorityId": int(priority_id or 2),
         }
-        if contact_id:  payload["ContactId"]  = contact_id
-        if location_id: payload["LocationId"] = location_id
-        if type_id:     payload["TypeId"]     = type_id
-        if queue_id:    payload["QueueId"]    = queue_id
+        if contact_id:  payload["ContactId"]  = int(contact_id)
+        if location_id: payload["LocationId"] = int(location_id)
+        if type_id:     payload["TypeId"]     = int(type_id)
+        if queue_id:    payload["QueueId"]    = int(queue_id)
 
+        logger.info(f"create_ticket payload: {payload}")
         data = self._post("/v2/servicedesk/tickets", payload)
+        logger.info(f"create_ticket response: {data}")
 
         if not data.get("success"):
             msg = data.get("error", {}).get("message", "Errore sconosciuto")
