@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: pulseway-voicebot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn voicebot_api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PULSEWAY_SERVER_URL
+        sync: false
+      - key: PULSEWAY_USERNAME
+        sync: false
+      - key: PULSEWAY_PASSWORD
+        sync: false
+      - key: PULSEWAY_TENANT
+        sync: false
