@@ -96,14 +96,14 @@ class PulsewayClient:
     def lookup_contact(self, name: str = None, email: str = None) -> dict | None:
         """
         Cerca un contatto per nome o email.
-        Restituisce il primo risultato trovato, o None se non trovato.
+        Endpoint corretto: GET /v2/crm/contacts/search
         """
         contacts = []
 
         # Prima prova per email (più precisa)
         if email:
-            data = self._get("/v2/crm/contacts/search/select", params={
-                "Filter.Email": email,
+            data = self._get("/v2/crm/contacts/search", params={
+                "Filter.EmailAddress": email,
                 "PageSize": 5,
             })
             contacts = data.get("result", []) or []
@@ -116,7 +116,7 @@ class PulsewayClient:
                 params["Filter.FirstName"] = parts[0]
             if len(parts) > 1:
                 params["Filter.LastName"] = " ".join(parts[1:])
-            data = self._get("/v2/crm/contacts/search/select", params=params)
+            data = self._get("/v2/crm/contacts/search", params=params)
             contacts = data.get("result", []) or []
 
         if not contacts:
