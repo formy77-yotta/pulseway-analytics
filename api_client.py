@@ -169,16 +169,17 @@ class PulsewayClient:
     # TICKET APERTI — usato dal voicebot
     # ------------------------------------------------------------------
 
-    def get_open_tickets_by_account(self, account_id: int, max_results: int = 5) -> list[dict]:
-        """Restituisce i ticket aperti (non completati) di un'azienda via GET."""
-        data = self._get("/v2/servicedesk/tickets", params={
-            "Filter.AccountId": account_id,
+    def get_open_tickets_by_account(self, account_id: int, max_results: int = 5, contact_id: int = None) -> list[dict]:
+        """Restituisce i ticket aperti del contatto specifico, filtrando per contactId."""
+        params = {
+            "Filter.ContactId": contact_id,
             "Filter.ExcludeCompleted": 1,
             "PageSize": max_results,
             "PageNumber": 1,
-        })
+        }
+        data = self._get("/v2/servicedesk/tickets", params=params)
         tickets = data.get("result", []) or []
-        logger.info(f"get_open_tickets: {len(tickets)} ticket trovati per account {account_id}")
+        logger.info(f"get_open_tickets: {len(tickets)} ticket trovati per contact {contact_id}")
         return [
             {
                 "ticketId":     t.get("id"),

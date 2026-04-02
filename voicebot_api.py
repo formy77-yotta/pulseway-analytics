@@ -52,6 +52,7 @@ class LookupContactRequest(BaseModel):
 
 class OpenTicketsRequest(BaseModel):
     account_id: int
+    contact_id: Optional[int] = None
     max_results: Optional[int] = 5
 
 class CreateTicketRequest(BaseModel):
@@ -101,6 +102,7 @@ def get_open_tickets(req: OpenTicketsRequest):
 
     tickets = client.get_open_tickets_by_account(
         account_id=req.account_id,
+        contact_id=req.contact_id,
         max_results=req.max_results,
     )
 
