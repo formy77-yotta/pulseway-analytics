@@ -231,6 +231,16 @@ class PulsewayClient:
         }
         if contact_id:  payload["ContactId"]  = int(contact_id)
         if location_id: payload["LocationId"] = int(location_id)
+        elif contact_id:
+            # Recupera LocationId dal contatto se non passato esplicitamente
+            try:
+                contact_data = self._get(f"/v2/crm/contacts/summary/{contact_id}")
+                loc_id = contact_data.get("result", {}).get("locationId")
+                if loc_id:
+                    payload["LocationId"] = int(loc_id)
+                    logger.info(f"LocationId recuperato dal contatto: {loc_id}")
+            except Exception as e:
+                logger.warning(f"Impossibile recuperare LocationId: {e}")
         if type_id:     payload["TypeId"]     = int(type_id)
         if queue_id:    payload["QueueId"]    = int(queue_id)
 

@@ -90,6 +90,12 @@ def get_system_lookup(table_name: str):
     data = client._get(f"/v2/system/{table_name}/lookup")
     return data
 
+@app.get("/utils/syslookup/{table_name}", dependencies=[Depends(verify_api_key)])
+def get_sys_lookup(table_name: str):
+    """Utility per recuperare i valori dal lookup generico /v2/system/lookup/{tableName}."""
+    data = client._get(f"/v2/system/lookup/{table_name}")
+    return data
+
 
 @app.post("/tools/lookup_contact", dependencies=[Depends(verify_api_key)])
 def lookup_contact(req: LookupContactRequest):
