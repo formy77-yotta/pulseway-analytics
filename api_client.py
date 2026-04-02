@@ -117,6 +117,7 @@ class PulsewayClient:
             if len(parts) > 1:
                 params["Filter.LastName"] = " ".join(parts[1:])
             data = self._get("/v2/crm/contacts/search", params=params)
+            logger.info(f"Pulseway response: {data}")  # ← aggiungi questa
             contacts = data.get("result", []) or []
 
         if not contacts:
