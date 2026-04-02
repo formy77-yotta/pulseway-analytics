@@ -80,8 +80,14 @@ def health():
 
 @app.get("/utils/lookup/{table_name}", dependencies=[Depends(verify_api_key)])
 def get_lookup(table_name: str):
-    """Utility per recuperare i valori di lookup Pulseway."""
+    """Utility per recuperare i valori di lookup Pulseway (tenant)."""
     data = client._get(f"/v2/system/tenantlookup/{table_name}")
+    return data
+
+@app.get("/utils/system/{table_name}", dependencies=[Depends(verify_api_key)])
+def get_system_lookup(table_name: str):
+    """Utility per recuperare i valori di sistema Pulseway (statuses, priorities, queues, sources)."""
+    data = client._get(f"/v2/system/{table_name}/lookup")
     return data
 
 
