@@ -96,34 +96,62 @@ class PulsewayClient:
     def lookup_contact(self, name: str = None, email: str = None) -> dict | None:
         """
         Cerca un contatto per nome o email.
-        Endpoint corretto: GET /v2/crm/contacts/search
+        Prova più strategie: email, nome, nome invertito, solo cognome.
         """
         contacts = []
 
-        # Prima prova per email (più precisa)
+        # 1. Cerca per email (più precisa)
         if email:
             data = self._get("/v2/crm/contacts/search", params={
                 "Filter.EmailAddress": email,
                 "PageSize": 5,
             })
             contacts = data.get("result", []) or []
+            logger.info(f"Ricerca per email: {len(contacts)} risultati")
 
-        # Se non trovato per email, cerca per nome
+        # 2. Cerca per nome (FirstName + LastName)
         if not contacts and name:
             parts = name.strip().split()
-            params = {"PageSize": 10}
-            if parts:
-                params["Filter.FirstName"] = parts[0]
-            if len(parts) > 1:
-                params["Filter.LastName"] = " ".join(parts[1:])
-            data = self._get("/v2/crm/contacts/search", params=params)
-            logger.info(f"Pulseway response: {data}")  # ← aggiungi questa
-            contacts = data.get("result", []) or []
+            if len(parts) >= 2:
+                params = {
+                    "Filter.FirstName": parts[0],
+                    "Filter.LastName":  " ".join(parts[1:]),
+                    "PageSize": 10,
+                }
+                data = self._get("/v2/crm/contacts/search", params=params)
+                contacts = data.get("result", []) or []
+                logger.info(f"Ricerca nome normale: {len(contacts)} risultati")
+
+        # 3. Prova invertendo (es. "Carlos Poggi" → FirstName=Poggi, LastName=Carlos)
+        if not contacts and name:
+            parts = name.strip().split()
+            if len(parts) >= 2:
+                params = {
+                    "Filter.FirstName": parts[-1],
+                    "Filter.LastName":  " ".join(parts[:-1]),
+                    "PageSize": 10,
+                }
+                data = self._get("/v2/crm/contacts/search", params=params)
+                contacts = data.get("result", []) or []
+                logger.info(f"Ricerca nome invertito: {len(contacts)} risultati")
+
+        # 4. Cerca solo per ogni termine (potrebbe essere solo cognome o solo nome)
+        if not contacts and name:
+            parts = name.strip().split()
+            for term in parts:
+                params = {"Filter.LastName": term, "PageSize": 10}
+                data = self._get("/v2/crm/contacts/search", params=params)
+                contacts = data.get("result", []) or []
+                logger.info(f"Ricerca solo cognome '{term}': {len(contacts)} risultati")
+                if contacts:
+                    break
 
         if not contacts:
+            logger.info(f"Nessun contatto trovato per: name={name} email={email}")
             return None
 
         c = contacts[0]
+        logger.info(f"Contatto trovato: {c.get('firstName')} {c.get('lastName')} - {c.get('accountName')}")
         return {
             "contactId":    c.get("id"),
             "accountId":    c.get("accountId"),
