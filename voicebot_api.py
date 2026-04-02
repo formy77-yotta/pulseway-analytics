@@ -1,13 +1,15 @@
 """
 voicebot_api.py — FastAPI endpoint per ElevenLabs Conversational AI.
-Deployare su Render come servizio separato.
+Protetto da API Key tramite header X-API-Key.
 
 Avvio locale:  uvicorn voicebot_api:app --reload --port 8000
 Su Render:     viene avviato tramite render.yaml
 """
 
-from fastapi import FastAPI, HTTPException
+import os
+from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 from typing import Optional
 from loguru import logger
@@ -22,7 +24,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ------------------------------------------------------------------
+# API Key auth
+# ------------------------------------------------------------------
+API_KEY = os.environ.get("VOICEBOT_API_KEY", "")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def verify_api_key(key: str = Security(api_key_header)):
+    if not API_KEY:
+        return  # Se non configurata, skip (utile in dev)
+    if key != API_KEY:
+        raise HTTPException(status_code=403, detail="API Key non valida o mancante")
+
+# ------------------------------------------------------------------
 # Client Pulseway — unica istanza, gestisce token automaticamente
+# ------------------------------------------------------------------
 client = PulsewayClient()
 
 
@@ -44,7 +60,7 @@ class CreateTicketRequest(BaseModel):
     description: Optional[str] = None
     contact_id: Optional[int] = None
     location_id: Optional[int] = None
-    priority_id: Optional[int] = 2   # 1=Low 2=Medium 3=High 4=Critical
+    priority_id: Optional[int] = 2
     type_id: Optional[int] = None
     queue_id: Optional[int] = None
 
@@ -61,34 +77,26 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/tools/lookup_contact")
+@app.post("/tools/lookup_contact", dependencies=[Depends(verify_api_key)])
 def lookup_contact(req: LookupContactRequest):
-    """
-    Cerca il cliente su Pulseway per nome o email.
-    ElevenLabs chiama questo appena conosce il nome del cliente.
-    """
     if not req.name and not req.email:
         raise HTTPException(status_code=400, detail="Fornire almeno name o email.")
 
     logger.info(f"lookup_contact: name={req.name} email={req.email}")
-
     contact = client.lookup_contact(name=req.name, email=req.email)
+    logger.info(f"lookup_contact result: {contact}")
 
     if not contact:
         return {
             "found": False,
-            "message": "Nessun contatto trovato. Procedo raccogliendo i dati manualmente.",
+            "message": "Nessun contatto trovato.",
         }
 
     return {"found": True, **contact}
 
 
-@app.post("/tools/get_open_tickets")
+@app.post("/tools/get_open_tickets", dependencies=[Depends(verify_api_key)])
 def get_open_tickets(req: OpenTicketsRequest):
-    """
-    Recupera i ticket aperti dell'azienda del cliente.
-    ElevenLabs chiama questo se il cliente chiede lo stato delle sue richieste.
-    """
     logger.info(f"get_open_tickets: account_id={req.account_id}")
 
     tickets = client.get_open_tickets_by_account(
@@ -102,12 +110,8 @@ def get_open_tickets(req: OpenTicketsRequest):
     return {"count": len(tickets), "tickets": tickets}
 
 
-@app.post("/tools/create_ticket")
+@app.post("/tools/create_ticket", dependencies=[Depends(verify_api_key)])
 def create_ticket(req: CreateTicketRequest):
-    """
-    Crea un nuovo ticket su Pulseway con le info raccolte dal voicebot.
-    ElevenLabs chiama questo alla fine della conversazione.
-    """
     logger.info(f"create_ticket: account_id={req.account_id} title={req.title}")
 
     try:
@@ -130,9 +134,8 @@ def create_ticket(req: CreateTicketRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
 
-@app.post("/tools/get_account_info")
+@app.post("/tools/get_account_info", dependencies=[Depends(verify_api_key)])
 def get_account_info(req: AccountInfoRequest):
-    """Info aggiuntive sull'azienda del cliente."""
     logger.info(f"get_account_info: account_id={req.account_id}")
 
     info = client.get_account_info(req.account_id)

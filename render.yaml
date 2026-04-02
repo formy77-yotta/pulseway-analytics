@@ -13,3 +13,5 @@ services:
         sync: false
       - key: PULSEWAY_TENANT
         sync: false
+      - key: VOICEBOT_API_KEY
+        sync: false
