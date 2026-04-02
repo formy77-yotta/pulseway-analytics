@@ -170,16 +170,15 @@ class PulsewayClient:
     # ------------------------------------------------------------------
 
     def get_open_tickets_by_account(self, account_id: int, max_results: int = 5) -> list[dict]:
-        """Restituisce i ticket aperti (non completati) di un'azienda."""
-        data = self._post("/v2/servicedesk/tickets/search", {
-            "Filter": {
-                "AccountIds": [account_id],
-                "ExcludeCompleted": 1,
-            },
+        """Restituisce i ticket aperti (non completati) di un'azienda via GET."""
+        data = self._get("/v2/servicedesk/tickets", params={
+            "Filter.AccountId": account_id,
+            "Filter.ExcludeCompleted": 1,
             "PageSize": max_results,
             "PageNumber": 1,
         })
         tickets = data.get("result", []) or []
+        logger.info(f"get_open_tickets: {len(tickets)} ticket trovati per account {account_id}")
         return [
             {
                 "ticketId":     t.get("id"),
