@@ -227,6 +227,7 @@ class PulsewayClient:
             "TypeId":     8,       # Incident
             "StatusId":   49958,   # Nuovo
             "QueueId":    38402,   # YottaCore Support
+            "SourceId":   6,       # Voice Mail
             "OpenDate":   datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         }
         if contact_id:  payload["ContactId"]  = int(contact_id)
