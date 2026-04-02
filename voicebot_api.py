@@ -78,6 +78,13 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/utils/lookup/{table_name}", dependencies=[Depends(verify_api_key)])
+def get_lookup(table_name: str):
+    """Utility per recuperare i valori di lookup Pulseway."""
+    data = client._get(f"/v2/system/tenantlookup/{table_name}")
+    return data
+
+
 @app.post("/tools/lookup_contact", dependencies=[Depends(verify_api_key)])
 def lookup_contact(req: LookupContactRequest):
     if not req.name and not req.email:
