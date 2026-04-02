@@ -214,13 +214,19 @@ class PulsewayClient:
         priority_id: 1=Low 2=Medium 3=High 4=Critical
         """
         from datetime import datetime, timezone
+
+        # Mappa priorità 1-4 → ID reali Pulseway
+        priority_map = {1: 40482, 2: 40483, 3: 40481, 4: 40484}
+        real_priority = priority_map.get(int(priority_id or 2), 40483)
+
         payload = {
             "AccountId":  int(account_id),
             "Title":      str(title),
             "Details":    str(description or title),
-            "PriorityId": int(priority_id or 2),
-            "TypeId":     8,  # Incident (default)
-            "StatusId":   1,  # Nuovo
+            "PriorityId": real_priority,
+            "TypeId":     8,       # Incident
+            "StatusId":   49958,   # Nuovo
+            "QueueId":    38402,   # YottaCore Support
             "OpenDate":   datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         }
         if contact_id:  payload["ContactId"]  = int(contact_id)
