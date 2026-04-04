@@ -16,9 +16,10 @@ pg = st.navigation({
         st.Page("pages/sd_configurazione.py", title="Configurazione", icon="⚙️"),
     ],
     "💰 Vendite": [
-        st.Page("pages/vd_fatturato.py", title="Fatturato",  icon="📈"),
-        st.Page("pages/vd_clienti.py",  title="Clienti",    icon="🏢"),
-        st.Page("pages/vd_attivita.py", title="Attività",   icon="⏱️"),
+        st.Page("pages/vd_fatturato.py",       title="Fatturato",      icon="📈"),
+        st.Page("pages/vd_clienti.py",         title="Clienti",        icon="🏢"),
+        st.Page("pages/vd_attivita.py",        title="Attività",       icon="⏱️"),
+        st.Page("pages/vd_configurazione.py",  title="Configurazione", icon="⚙️"),
     ],
 })
 

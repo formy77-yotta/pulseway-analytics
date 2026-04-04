@@ -342,7 +342,7 @@ fig_bvc.update_layout(
     margin=dict(t=40, b=10),
 )
 st.plotly_chart(fig_bvc, use_container_width=True)
-st.caption("🟢 ≥ 100% target  |  🟡 80–100%  |  🔴 < 80% — target configurabile per tecnico nella sezione sottostante")
+st.caption("🟢 ≥ 100% target  |  🟡 80–100%  |  🔴 < 80% — target configurabile in [⚙️ Configurazione](vd_configurazione)")
 
 st.divider()
 
