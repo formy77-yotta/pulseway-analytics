@@ -195,13 +195,17 @@ pivot = (
 # Ordina colonne cronologicamente
 pivot = pivot[sorted(pivot.columns)]
 
-# Aggiungi colonna Totale
+# Aggiungi colonna Totale riga e riga Totale colonna
 pivot["Totale"] = pivot.sum(axis=1)
+totale_row = pivot.sum(axis=0).rename("— Totale")
+pivot = pd.concat([pivot, totale_row.to_frame().T])
 
 # Mappa target per nome tecnico
 op_id_map = df_op.set_index("nome")["id"].to_dict()
 
 def _color_pivot_row(row):
+    if row.name == "— Totale":
+        return ["font-weight: bold"] * len(row)
     op_name = row.name
     op_id   = op_id_map.get(op_name)
     target  = get_target(op_id) if op_id else 160.0
@@ -219,7 +223,6 @@ styled_pivot = (
     pivot.style
     .apply(_color_pivot_row, axis=1)
     .format("{:.1f}", na_rep="—")
-    .format("{:.1f}", subset=["Totale"])
 )
 
 st.dataframe(styled_pivot, use_container_width=True)
