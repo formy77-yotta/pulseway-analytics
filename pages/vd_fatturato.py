@@ -80,16 +80,24 @@ clienti_lista = ["Tutti"] + sorted(df_raw["cliente_nome"].dropna().unique().toli
 sel_cliente = st.sidebar.selectbox("Cliente", clienti_lista)
 
 tipi_ctrl = sorted(df_raw["contropartita_tipo"].unique().tolist())
-sel_tipi_ctrl = st.sidebar.multiselect("Tipo contropartita", tipi_ctrl, default=tipi_ctrl)
+# Default: solo RICAVO — esclude acquisti/costi/finanziario come in Power BI
+tipi_default = [t for t in tipi_ctrl if t == "RICAVO"]
+if not tipi_default:          # fallback se RICAVO non esiste ancora nel DB
+    tipi_default = tipi_ctrl
+sel_tipi_ctrl = st.sidebar.multiselect("Tipo contropartita", tipi_ctrl, default=tipi_default)
 
-cat_lista = sorted(df_raw["contropartita_cat"].unique().tolist())
+# Le categorie disponibili cambiano in base al tipo selezionato
+cat_lista = sorted(
+    df_raw[df_raw["contropartita_tipo"].isin(sel_tipi_ctrl)]["contropartita_cat"]
+    .unique().tolist()
+)
 sel_cat = st.sidebar.multiselect("Categoria", cat_lista, default=cat_lista)
 
 tipo_doc_map = {"Tutti": None, "Solo fatture": "A", "Solo note credito": "N"}
 sel_tipo_label = st.sidebar.selectbox("Tipo documento", list(tipo_doc_map.keys()))
 sel_tipo = tipo_doc_map[sel_tipo_label]
 
-# Applica filtri — usa set() per confronto robusto indipendente dall'ordine
+# Applica filtri
 f = df_raw.copy()
 if sel_anni:
     f = f[f["anno"].isin(sel_anni)]
