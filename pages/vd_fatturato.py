@@ -133,7 +133,7 @@ c3.metric(
     delta=f"{yoy:+.1f}%" if yoy is not None else None,
 )
 c4.metric("Fatture emesse", f"{n_fatture:,}".replace(",", "."))
-c5.metric("Ticket medio", f"€ {ticket_medio:,.2f}".replace(",", "."))
+c5.metric("Importo medio per fattura", f"€ {ticket_medio:,.2f}".replace(",", "."))
 
 st.divider()
 
