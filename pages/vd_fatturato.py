@@ -132,42 +132,50 @@ c5.metric("Ticket medio", f"€ {ticket_medio:,.2f}".replace(",", "."))
 st.divider()
 
 # ------------------------------------------------------------------
-# Trend mensile — anno corrente vs anno precedente
+# Trend mensile + Cumulato per anno
 # ------------------------------------------------------------------
-st.subheader("📅 Trend Mensile")
-
-def monthly_trend(data: pd.DataFrame, anno: int) -> pd.DataFrame:
-    sub = data[data["anno"] == anno].copy()
-    sub["mese"] = sub["data_doc"].dt.month
-    return (
-        sub.groupby("mese")["importo"]
-        .sum()
-        .reset_index()
-        .assign(anno=str(anno))
-    )
-
-trend_ac  = monthly_trend(df_ricavi, anno_corrente)
-trend_prec = monthly_trend(df_ricavi, anno_precedente)
-trend = pd.concat([trend_ac, trend_prec], ignore_index=True)
-
 mese_labels = {
     1:"Gen", 2:"Feb", 3:"Mar", 4:"Apr", 5:"Mag", 6:"Giu",
     7:"Lug", 8:"Ago", 9:"Set", 10:"Ott", 11:"Nov", 12:"Dic",
 }
-trend["mese_label"] = trend["mese"].map(mese_labels)
-trend = trend.sort_values("mese")
 
-fig_trend = px.line(
-    trend, x="mese_label", y="importo", color="anno",
-    markers=True,
-    labels={"importo": "Fatturato (€)", "mese_label": "Mese", "anno": "Anno"},
-    color_discrete_map={
-        str(anno_corrente):   "#636efa",
-        str(anno_precedente): "#ef553b",
-    },
+f_trend = f.copy()
+f_trend["mese"] = f_trend["data_doc"].dt.month
+f_trend["anno_str"] = f_trend["anno"].astype(str)
+
+# Raggruppa per anno × mese (tutti gli anni selezionati)
+trend = (
+    f_trend.groupby(["anno_str", "mese"])["importo"]
+    .sum()
+    .reset_index()
+    .sort_values(["anno_str", "mese"])
 )
-fig_trend.update_layout(height=340, margin=dict(t=10, b=10))
-st.plotly_chart(fig_trend, use_container_width=True)
+trend["mese_label"] = trend["mese"].map(mese_labels)
+
+# Cumulato mensile per anno
+trend["importo_cum"] = trend.groupby("anno_str")["importo"].cumsum()
+
+tab_mensile, tab_cumulato = st.tabs(["📅 Trend Mensile", "📈 Andamento Cumulato"])
+
+with tab_mensile:
+    fig_trend = px.line(
+        trend, x="mese_label", y="importo", color="anno_str",
+        markers=True,
+        category_orders={"mese_label": list(mese_labels.values())},
+        labels={"importo": "Fatturato (€)", "mese_label": "Mese", "anno_str": "Anno"},
+    )
+    fig_trend.update_layout(height=360, margin=dict(t=10, b=10))
+    st.plotly_chart(fig_trend, use_container_width=True)
+
+with tab_cumulato:
+    fig_cum = px.line(
+        trend, x="mese_label", y="importo_cum", color="anno_str",
+        markers=True,
+        category_orders={"mese_label": list(mese_labels.values())},
+        labels={"importo_cum": "Fatturato cumulato (€)", "mese_label": "Mese", "anno_str": "Anno"},
+    )
+    fig_cum.update_layout(height=360, margin=dict(t=10, b=10))
+    st.plotly_chart(fig_cum, use_container_width=True)
 
 st.divider()
 
