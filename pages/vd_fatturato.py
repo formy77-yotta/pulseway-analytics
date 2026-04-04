@@ -373,3 +373,63 @@ st.dataframe(
         "Data":        st.column_config.DateColumn(format="DD/MM/YYYY"),
     },
 )
+
+st.divider()
+
+# ------------------------------------------------------------------
+# Righe con contropartita COSTO (escluse dal fatturato)
+# ------------------------------------------------------------------
+with st.expander("🔍 Righe escluse — Contropartita COSTO / FINANZIARIO / ALTRO"):
+    costi = df_raw[df_raw["contropartita_tipo"] != "RICAVO"].copy()
+
+    ec1, ec2 = st.columns(2)
+    anni_costo = sorted(costi["anno"].dropna().unique().tolist(), reverse=True)
+    sel_anno_c = ec1.selectbox(
+        "Anno", anni_costo,
+        index=0 if anni_costo else 0,
+        key="costo_anno",
+    )
+    sel_tipo_c = ec2.multiselect(
+        "Tipo contropartita",
+        sorted(costi["contropartita_tipo"].unique().tolist()),
+        default=sorted(costi["contropartita_tipo"].unique().tolist()),
+        key="costo_tipo",
+    )
+
+    costi = costi[
+        (costi["anno"] == sel_anno_c) &
+        (costi["contropartita_tipo"].isin(sel_tipo_c))
+    ]
+
+    # Aggrega a livello testata
+    costi_tbl = (
+        costi.groupby([
+            "anno", "serie", "numdoc", "tipo_doc", "data_doc",
+            "cliente_nome", "contropartita_cat", "contropartita_desc",
+        ])["importo"]
+        .sum()
+        .reset_index()
+        .sort_values("data_doc", ascending=False)
+    )
+    costi_tbl.columns = [
+        "Anno", "Serie", "Num. Doc", "Tipo", "Data",
+        "Cliente", "Categoria", "Voce", "Importo (€)",
+    ]
+    costi_tbl["Tipo"] = costi_tbl["Tipo"].map(
+        {"A": "Fattura", "N": "Nota credito"}
+    ).fillna(costi_tbl["Tipo"])
+    costi_tbl["Data"] = pd.to_datetime(costi_tbl["Data"]).dt.date
+
+    totale_escluso = costi_tbl["Importo (€)"].sum()
+    st.caption(
+        f"{len(costi_tbl):,} documenti esclusi — totale importo: "
+        f"€ {totale_escluso:,.2f}".replace(",", ".")
+    )
+    st.dataframe(
+        costi_tbl.reset_index(drop=True),
+        use_container_width=True,
+        column_config={
+            "Importo (€)": st.column_config.NumberColumn(format="€ %.2f"),
+            "Data":        st.column_config.DateColumn(format="DD/MM/YYYY"),
+        },
+    )
