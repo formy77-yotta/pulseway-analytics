@@ -450,6 +450,7 @@ def etl_vendite():
         ON  m.mm_anno   = t.tm_anno
         AND m.mm_serie  = t.tm_serie
         AND m.mm_numdoc = t.tm_numdoc
+        AND m.mm_tipork = t.tm_tipork
     WHERE t.tm_tipork IN ('A', 'N')
       AND NOT (t.tm_tipork = 'B' AND t.tm_tiporkfat = 'A')
       AND t.tm_anno >= {ANNO_DA}
