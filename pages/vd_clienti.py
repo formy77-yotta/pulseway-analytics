@@ -136,7 +136,7 @@ ticket_tot = (
     .rename(columns={"account_id": "pulseway_id"})
 )
 ticket_tot["sla_pct"] = (
-    ticket_tot["sla_ok"] / ticket_tot["sla_tot"].replace(0, pd.NA) * 100
+    ticket_tot["sla_ok"] / ticket_tot["sla_tot"].replace(0, float("nan")) * 100
 ).round(1)
 ticket_tot["ultimo_ticket"] = ticket_tot["ultimo_ticket"].dt.tz_localize(None)
 
@@ -158,7 +158,7 @@ df["n_fatture"]      = df["n_fatture"].fillna(0).astype(int)
 df["n_ticket_tot"]   = df["n_ticket_tot"].fillna(0).astype(int)
 df["n_ticket_aperti"]= df["n_ticket_aperti"].fillna(0).astype(int)
 df["var_yoy"]        = (
-    (df["fat_ytd"] - df["fat_prec"]) / df["fat_prec"].replace(0, pd.NA) * 100
+    (df["fat_ytd"] - df["fat_prec"]) / df["fat_prec"].replace(0, float("nan")) * 100
 ).round(1)
 
 # Applica filtri sidebar
