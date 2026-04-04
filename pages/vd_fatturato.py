@@ -31,10 +31,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             c.nome   AS cliente_nome,
             c.citta, c.provincia, c.tipo AS cliente_tipo,
             cp.descrizione AS contropartita_desc,
+            cp.categoria   AS contropartita_cat,
             cp.tipo        AS contropartita_tipo
         FROM fact_vendite v
-        LEFT JOIN dim_clienti      c  ON c.nts_id  = v.cliente_id
-        LEFT JOIN dim_contropartite cp ON cp.codice = v.contropartita
+        LEFT JOIN dim_clienti       c  ON c.nts_id  = v.cliente_id
+        LEFT JOIN dim_contropartite cp ON cp.codice  = v.contropartita
     """, engine)
 
     clienti       = pd.read_sql("SELECT * FROM dim_clienti",       engine)
@@ -75,8 +76,13 @@ sel_anni = st.sidebar.multiselect(
 clienti_lista = ["Tutti"] + sorted(df_ricavi["cliente_nome"].dropna().unique().tolist())
 sel_cliente = st.sidebar.selectbox("Cliente", clienti_lista)
 
-ctrl_lista = sorted(df_ricavi["contropartita_desc"].dropna().unique().tolist())
-sel_ctrl = st.sidebar.multiselect("Contropartita", ctrl_lista, default=ctrl_lista)
+# Filtro tipo contropartita (RICAVO/COSTO/…)
+tipi_ctrl = sorted(df_ricavi["contropartita_tipo"].dropna().unique().tolist())
+sel_tipi_ctrl = st.sidebar.multiselect("Tipo contropartita", tipi_ctrl, default=tipi_ctrl)
+
+# Filtro categoria contropartita (Canoni, Servizi spot, …)
+cat_lista = sorted(df_ricavi["contropartita_cat"].dropna().unique().tolist())
+sel_cat = st.sidebar.multiselect("Categoria", cat_lista, default=cat_lista)
 
 tipo_doc_map = {"Tutti": None, "Solo fatture": "A", "Solo note credito": "N"}
 sel_tipo_label = st.sidebar.selectbox("Tipo documento", list(tipo_doc_map.keys()))
@@ -88,8 +94,10 @@ if sel_anni:
     f = f[f["anno"].isin(sel_anni)]
 if sel_cliente != "Tutti":
     f = f[f["cliente_nome"] == sel_cliente]
-if sel_ctrl != ctrl_lista:
-    f = f[f["contropartita_desc"].isin(sel_ctrl)]
+if sel_tipi_ctrl != tipi_ctrl:
+    f = f[f["contropartita_tipo"].isin(sel_tipi_ctrl)]
+if sel_cat != cat_lista:
+    f = f[f["contropartita_cat"].isin(sel_cat)]
 if sel_tipo:
     f = f[f["tipo_doc"] == sel_tipo]
 
@@ -227,20 +235,40 @@ else:
         st.plotly_chart(fig_cli, use_container_width=True)
 
     with col_b:
-        by_ctrl = (
-            f_anno.groupby("contropartita_desc")["importo"]
-            .sum()
-            .reset_index()
-            .sort_values("importo", ascending=False)
-        )
-        by_ctrl.columns = ["Contropartita", "Fatturato"]
-        fig_ctrl = px.pie(
-            by_ctrl, values="Fatturato", names="Contropartita",
-            hole=0.45,
-            title=f"Per Contropartita — {anno_sel}",
-        )
-        fig_ctrl.update_layout(height=420, margin=dict(t=30, b=10))
-        st.plotly_chart(fig_ctrl, use_container_width=True)
+        tab_cat, tab_desc = st.tabs(["Per categoria", "Per voce"])
+
+        with tab_cat:
+            by_cat = (
+                f_anno.groupby("contropartita_cat")["importo"]
+                .sum()
+                .reset_index()
+                .sort_values("importo", ascending=False)
+            )
+            by_cat.columns = ["Categoria", "Fatturato"]
+            fig_cat = px.pie(
+                by_cat, values="Fatturato", names="Categoria",
+                hole=0.45,
+                title=f"Per Categoria — {anno_sel}",
+            )
+            fig_cat.update_layout(height=390, margin=dict(t=30, b=10))
+            st.plotly_chart(fig_cat, use_container_width=True)
+
+        with tab_desc:
+            by_desc = (
+                f_anno.groupby("contropartita_desc")["importo"]
+                .sum()
+                .reset_index()
+                .sort_values("importo", ascending=False)
+            )
+            by_desc.columns = ["Voce", "Fatturato"]
+            fig_desc = px.bar(
+                by_desc, x="Fatturato", y="Voce", orientation="h",
+                color="Fatturato", color_continuous_scale="Blues",
+                title=f"Per Voce — {anno_sel}",
+                labels={"Fatturato": "€"},
+            )
+            fig_desc.update_layout(height=390, margin=dict(t=30, b=10), yaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_desc, use_container_width=True)
 
 st.divider()
 
