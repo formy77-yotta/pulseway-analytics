@@ -30,9 +30,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
     vendite = pd.read_sql(
         """
-        SELECT cliente_id, anno, data_doc, importo, serie, numdoc
-        FROM fact_vendite
-        WHERE cliente_id IS NOT NULL
+        SELECT v.cliente_id, v.anno, v.data_doc, v.importo, v.serie, v.numdoc
+        FROM fact_vendite v
+        JOIN dim_contropartite cp ON cp.codice = v.contropartita
+        WHERE v.cliente_id IS NOT NULL
+          AND cp.tipo = 'RICAVO'
         """,
         engine,
     )
