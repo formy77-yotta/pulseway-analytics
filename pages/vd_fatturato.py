@@ -56,9 +56,7 @@ if df_raw.empty:
     st.info("Nessun dato disponibile in fact_vendite.")
     st.stop()
 
-# Solo righe di ricavo per il fatturato principale
-RICAVO_TIPI = ("RICAVO", "RICAVO_ACCESSORIO")
-df_ricavi = df_raw[df_raw["contropartita_tipo"].isin(RICAVO_TIPI)].copy()
+df_ricavi = df_raw.copy()
 
 anno_corrente   = date.today().year
 anno_precedente = anno_corrente - 1
@@ -78,7 +76,7 @@ clienti_lista = ["Tutti"] + sorted(df_ricavi["cliente_nome"].dropna().unique().t
 sel_cliente = st.sidebar.selectbox("Cliente", clienti_lista)
 
 ctrl_lista = sorted(df_ricavi["contropartita_desc"].dropna().unique().tolist())
-sel_ctrl = st.sidebar.multiselect("Contropartita", ctrl_lista, default=[])
+sel_ctrl = st.sidebar.multiselect("Contropartita", ctrl_lista, default=ctrl_lista)
 
 tipo_doc_map = {"Tutti": None, "Solo fatture": "A", "Solo note credito": "N"}
 sel_tipo_label = st.sidebar.selectbox("Tipo documento", list(tipo_doc_map.keys()))
@@ -90,7 +88,7 @@ if sel_anni:
     f = f[f["anno"].isin(sel_anni)]
 if sel_cliente != "Tutti":
     f = f[f["cliente_nome"] == sel_cliente]
-if sel_ctrl:
+if sel_ctrl != ctrl_lista:
     f = f[f["contropartita_desc"].isin(sel_ctrl)]
 if sel_tipo:
     f = f[f["tipo_doc"] == sel_tipo]
