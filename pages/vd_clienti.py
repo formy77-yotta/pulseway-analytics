@@ -237,6 +237,18 @@ styled = tbl.reset_index(drop=True).style.apply(_color_rows, axis=1).format({
 
 st.dataframe(styled, use_container_width=True, height=420)
 
+leg1, leg2, _ = st.columns([1, 1, 4])
+leg1.markdown(
+    '<div style="background:#ffd6d6;padding:4px 10px;border-radius:4px;font-size:0.85em">'
+    '🔴 Ticket aperti &gt; 5</div>',
+    unsafe_allow_html=True,
+)
+leg2.markdown(
+    '<div style="background:#d6f5d6;padding:4px 10px;border-radius:4px;font-size:0.85em">'
+    '🟢 SLA rispettato &gt; 90%</div>',
+    unsafe_allow_html=True,
+)
+
 st.divider()
 
 # ------------------------------------------------------------------
