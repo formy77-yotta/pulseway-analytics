@@ -214,7 +214,7 @@ def _eff_color(val):
 
 styled_eff = (
     eff_df.reset_index(drop=True)
-    .style.applymap(_eff_color, subset=["Efficienza %"])
+    .style.map(_eff_color, subset=["Efficienza %"])
     .format({
         "Ore tot.":          "{:.1f}",
         "Fatturate":         "{:.1f}",
