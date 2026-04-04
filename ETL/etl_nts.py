@@ -138,6 +138,13 @@ CREATE INDEX IF NOT EXISTS idx_fact_attivita_cliente   ON fact_attivita(cliente_
 CREATE INDEX IF NOT EXISTS idx_fact_attivita_data      ON fact_attivita(data_attivita);
 CREATE INDEX IF NOT EXISTS idx_fact_attivita_operatore ON fact_attivita(operatore_id);
 CREATE INDEX IF NOT EXISTS idx_fact_attivita_status    ON fact_attivita(status_fatt);
+
+CREATE TABLE IF NOT EXISTS config_target_ore (
+    operatore_id        INTEGER PRIMARY KEY,
+    ore_target_mese     FLOAT   NOT NULL DEFAULT 160,
+    ore_lavorabili_mese FLOAT   NOT NULL DEFAULT 168,
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
 """
 
 STATUS_FATT_MAP = {
