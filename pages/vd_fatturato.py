@@ -197,8 +197,10 @@ else:
 
     with col_cat1:
         # Stacked bar: categorie × anno
+        f_cat = f.copy()
+        f_cat["anno_str"] = f_cat["anno"].astype(str)
         cat_anno = (
-            f.groupby(["anno_str", "contropartita_cat"])["importo"]
+            f_cat.groupby(["anno_str", "contropartita_cat"])["importo"]
             .sum()
             .reset_index()
         )
