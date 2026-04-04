@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 from config import DATABASE_URL
 
@@ -43,45 +43,15 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
     operatori = pd.read_sql("SELECT id, nome FROM dim_operatori ORDER BY nome", engine)
 
-    # Config target ore — crea la tabella se non esiste ancora
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS config_target_ore (
-                operatore_id        INTEGER PRIMARY KEY,
-                ore_target_mese     FLOAT NOT NULL DEFAULT 160,
-                ore_lavorabili_mese FLOAT NOT NULL DEFAULT 168,
-                updated_at          TIMESTAMPTZ DEFAULT NOW()
-            )
-        """))
-
-    config = pd.read_sql(
-        "SELECT operatore_id, ore_target_mese, ore_lavorabili_mese FROM config_target_ore",
-        engine,
-    )
+    try:
+        config = pd.read_sql(
+            "SELECT operatore_id, ore_target_mese, ore_lavorabili_mese FROM config_target_ore",
+            engine,
+        )
+    except Exception:
+        config = pd.DataFrame(columns=["operatore_id", "ore_target_mese", "ore_lavorabili_mese"])
 
     return attivita, operatori, config
-
-
-def save_config(df_config: pd.DataFrame):
-    """Salva la configurazione target ore su PostgreSQL."""
-    engine = create_engine(DATABASE_URL)
-    with engine.begin() as conn:
-        for _, row in df_config.iterrows():
-            conn.execute(text("""
-                INSERT INTO config_target_ore
-                    (operatore_id, ore_target_mese, ore_lavorabili_mese, updated_at)
-                VALUES
-                    (:oid, :target, :lav, NOW())
-                ON CONFLICT (operatore_id) DO UPDATE SET
-                    ore_target_mese     = EXCLUDED.ore_target_mese,
-                    ore_lavorabili_mese = EXCLUDED.ore_lavorabili_mese,
-                    updated_at          = NOW()
-            """), {
-                "oid":    int(row["operatore_id"]),
-                "target": float(row["ore_target_mese"]),
-                "lav":    float(row["ore_lavorabili_mese"]),
-            })
-    st.cache_data.clear()
 
 
 try:
