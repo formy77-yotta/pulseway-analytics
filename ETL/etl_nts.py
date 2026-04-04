@@ -566,7 +566,6 @@ def etl_attivita():
         TRIM(a.ac_oggetto)              AS oggetto,
         a.ac_note                       AS note,
         TRIM(a.ac_luogo)                AS luogo,
-        a.ac_oraesec                    AS ore_eseguite,
         d.acd_quantfa                   AS quantita_fatt,
         d.acd_valorefa                  AS importo_fatt,
         a.ac_statusfatt                 AS status_fatt,
@@ -612,9 +611,11 @@ def etl_attivita():
         NOW()
     )
     ON CONFLICT (id, riga) DO UPDATE SET
+        ore_eseguite      = EXCLUDED.ore_eseguite,
         status_fatt       = EXCLUDED.status_fatt,
         status_fatt_descr = EXCLUDED.status_fatt_descr,
         importo_fatt      = EXCLUDED.importo_fatt,
+        quantita_fatt     = EXCLUDED.quantita_fatt,
         anno_fatt         = EXCLUDED.anno_fatt,
         serie_fatt        = EXCLUDED.serie_fatt,
         numdoc_fatt       = EXCLUDED.numdoc_fatt,
@@ -659,7 +660,7 @@ def etl_attivita():
             _str(r.oggetto),
             _str(r.note),
             _str(r.luogo),
-            _float(r.ore_eseguite),
+            _float(r.quantita_fatt) if _str(r.tipo_riga) == 'O' else 0.0,
             _float(r.quantita_fatt),
             _float(r.importo_fatt),
             sf,
