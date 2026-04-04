@@ -6,3 +6,5 @@ __pycache__/
 venv/
 *.db
 .DS_Store
+ETL/test.py
+ETL/.env
