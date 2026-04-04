@@ -202,15 +202,18 @@ st.divider()
 # ------------------------------------------------------------------
 st.subheader("📋 Tabella Clienti")
 
+col_anno_corr = f"Fatt. {anno_corrente}"
+col_anno_prec = f"Fatt. {anno_precedente} (fino {cutoff_prec.strftime('%d/%m')})"
+
 cols_display = [
     "nome", "citta", "fatturato", "n_fatture",
-    "fat_ytd", "var_yoy",
+    "fat_ytd", "fat_prec", "var_yoy",
     "n_ticket_tot", "n_ticket_aperti", "ultimo_ticket", "sla_pct",
 ]
 tbl = df[cols_display].copy()
 tbl.columns = [
     "Cliente", "Città", "Fatturato tot.", "N° Fatture",
-    f"Fatturato {anno_corrente}", "Var% YoY",
+    col_anno_corr, col_anno_prec, "Var% YoY",
     "Ticket tot.", "Ticket aperti", "Ultimo ticket", "SLA %",
 ]
 tbl["Ultimo ticket"] = pd.to_datetime(tbl["Ultimo ticket"]).dt.date
@@ -225,10 +228,11 @@ def _color_rows(row):
 
 
 styled = tbl.reset_index(drop=True).style.apply(_color_rows, axis=1).format({
-    "Fatturato tot.":        "€ {:,.0f}",
-    f"Fatturato {anno_corrente}": "€ {:,.0f}",
-    "Var% YoY":              "{:+.1f}%",
-    "SLA %":                 "{:.1f}%",
+    "Fatturato tot.": "€ {:,.0f}",
+    col_anno_corr:    "€ {:,.0f}",
+    col_anno_prec:    "€ {:,.0f}",
+    "Var% YoY":       "{:+.1f}%",
+    "SLA %":          "{:.1f}%",
 }, na_rep="—")
 
 st.dataframe(styled, use_container_width=True, height=420)
