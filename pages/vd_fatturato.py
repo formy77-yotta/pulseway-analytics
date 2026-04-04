@@ -98,9 +98,17 @@ if sel_tipo:
 # ------------------------------------------------------------------
 st.subheader("📊 KPI Principali")
 
-ytd   = df_ricavi[df_ricavi["anno"] == anno_corrente]["importo"].sum()
-prec  = df_ricavi[df_ricavi["anno"] == anno_precedente]["importo"].sum()
-yoy   = round((ytd - prec) / abs(prec) * 100, 1) if prec else None
+oggi        = date.today()
+cutoff_prec = oggi.replace(year=anno_precedente)   # stessa data dell'anno scorso
+
+ytd  = df_ricavi[df_ricavi["anno"] == anno_corrente]["importo"].sum()
+prec = (
+    df_ricavi[
+        (df_ricavi["anno"] == anno_precedente) &
+        (df_ricavi["data_doc"].dt.date <= cutoff_prec)
+    ]["importo"].sum()
+)
+yoy  = round((ytd - prec) / abs(prec) * 100, 1) if prec else None
 
 # Numero fatture distinte (anno corrente)
 n_fatture = (
@@ -116,7 +124,7 @@ c1.metric(
     f"€ {ytd:,.0f}".replace(",", "."),
 )
 c2.metric(
-    f"Fatturato {anno_precedente}",
+    f"{anno_precedente} (fino al {cutoff_prec.strftime('%d/%m')})",
     f"€ {prec:,.0f}".replace(",", "."),
 )
 c3.metric(
