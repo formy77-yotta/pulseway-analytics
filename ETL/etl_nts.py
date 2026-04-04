@@ -147,19 +147,6 @@ STATUS_FATT_MAP = {
     "I": "Inclusa in contratto",
 }
 
-CONTROP_TIPO = {
-    5001: "RICAVO",
-    5002: "RICAVO_ACCESSORIO",
-    5003: "RETTIFICA_RICAVO",
-    5004: "AUTOFATTURA",
-    5005: "RICAVO",
-    1006: "CLIENTE",
-    1007: "CLIENTE",
-    1001: "IMMOBILIZZAZIONE",
-    6002: "RETTIFICA_COSTO",
-    7001: "PROVENTO",
-}
-
 
 def init_db():
     with get_pg_conn() as conn:
@@ -349,46 +336,70 @@ def etl_operatori():
 # ------------------------------------------------------------------
 
 def etl_contropartite():
-    logger.info("ETL Contropartite...")
+    logger.info("ETL Contropartite da TABCOVE...")
 
     sql = """
-    SELECT DISTINCT
-        tb_codmast       AS codice,
-        TRIM(tb_desmast) AS descrizione
-    FROM dbo.tabmast
-    WHERE tb_codmast IN (
+    SELECT
+        tb_codcove              AS codice,
+        TRIM(tb_descove)        AS descrizione,
+        tb_concove              AS conto_contabile
+    FROM dbo.TABCOVE
+    WHERE tb_codcove IN (
         SELECT DISTINCT mm_controp
         FROM dbo.movmag
         WHERE mm_controp IS NOT NULL AND mm_controp != 0
     )
     """
 
+    CATEGORIA_MAP = {
+        5001: ("Servizi spot",     "RICAVO"),
+        5002: ("Canoni",           "RICAVO"),
+        5003: ("Canoni",           "RICAVO"),
+        5004: ("Servizi",          "RICAVO"),
+        5005: ("Canoni",           "RICAVO"),
+        1007: ("Prodotti",         "RICAVO"),
+        4057: ("Ricavi accessori", "RICAVO"),
+        4054: ("Omaggi",           "RICAVO"),
+        4055: ("Omaggi",           "RICAVO"),
+        1006: ("Acquisti",         "COSTO"),
+        4060: ("Acquisti",         "COSTO"),
+        4062: ("Acquisti",         "COSTO"),
+        4063: ("Acquisti",         "COSTO"),
+        6002: ("Acquisti canone",  "COSTO"),
+        7001: ("Finanziario",      "FINANZIARIO"),
+    }
+
     with get_sql_conn() as conn:
         df = pd.read_sql(sql, conn)
 
-    # Deduplica per codice (prendi prima descrizione)
     df = df.drop_duplicates(subset=["codice"], keep="first")
 
     rows = [
         (
             int(r.codice),
             str(r.descrizione).strip() if r.descrizione else str(r.codice),
-            CONTROP_TIPO.get(int(r.codice), "ALTRO"),
+            CATEGORIA_MAP.get(int(r.codice), ("Altro", "ALTRO"))[0],
+            CATEGORIA_MAP.get(int(r.codice), ("Altro", "ALTRO"))[1],
+            str(r.conto_contabile) if r.conto_contabile else None,
         )
         for r in df.itertuples()
         if r.codice is not None
     ]
 
     upsert_sql = """
-    INSERT INTO dim_contropartite (codice, descrizione, tipo)
-    VALUES (%s, %s, %s)
+    INSERT INTO dim_contropartite (codice, descrizione, categoria, tipo, conto_contabile)
+    VALUES (%s, %s, %s, %s, %s)
     ON CONFLICT (codice) DO UPDATE SET
-        descrizione = EXCLUDED.descrizione,
-        tipo        = EXCLUDED.tipo;
+        descrizione     = EXCLUDED.descrizione,
+        categoria       = EXCLUDED.categoria,
+        tipo            = EXCLUDED.tipo,
+        conto_contabile = EXCLUDED.conto_contabile;
     """
 
     with get_pg_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("ALTER TABLE dim_contropartite ADD COLUMN IF NOT EXISTS categoria TEXT")
+            cur.execute("ALTER TABLE dim_contropartite ADD COLUMN IF NOT EXISTS conto_contabile TEXT")
             psycopg2.extras.execute_batch(cur, upsert_sql, rows)
         conn.commit()
 
