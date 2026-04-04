@@ -180,44 +180,61 @@ with tab_cumulato:
 st.divider()
 
 # ------------------------------------------------------------------
-# Top clienti + Fatturato per contropartita
+# Top clienti + Fatturato per contropartita  (un solo anno)
 # ------------------------------------------------------------------
-col_a, col_b = st.columns([3, 2])
+anni_in_filtro = sorted(f["anno"].dropna().unique().tolist(), reverse=True)
 
-with col_a:
-    st.subheader("🏢 Top 15 Clienti")
-    top_cli = (
-        f.groupby("cliente_nome")["importo"]
-        .sum()
-        .reset_index()
-        .sort_values("importo", ascending=False)
-        .head(15)
-    )
-    top_cli.columns = ["Cliente", "Fatturato"]
-    fig_cli = px.bar(
-        top_cli, x="Fatturato", y="Cliente", orientation="h",
-        color="Fatturato", color_continuous_scale="Blues",
-        labels={"Fatturato": "€"},
-    )
-    fig_cli.update_layout(height=420, margin=dict(t=10, b=10), yaxis=dict(autorange="reversed"))
-    fig_cli.update_traces(texttemplate="€ %{x:,.0f}", textposition="outside")
-    st.plotly_chart(fig_cli, use_container_width=True)
+st.subheader("🏢 Top 15 Clienti & Contropartite")
 
-with col_b:
-    st.subheader("🏷️ Per Contropartita")
-    by_ctrl = (
-        f.groupby("contropartita_desc")["importo"]
-        .sum()
-        .reset_index()
-        .sort_values("importo", ascending=False)
+if not anni_in_filtro:
+    st.info("Nessun dato per gli anni selezionati.")
+else:
+    anno_sel = st.radio(
+        "Anno di riferimento",
+        options=anni_in_filtro,
+        index=0,
+        horizontal=True,
+        key="radio_anno_grafici",
     )
-    by_ctrl.columns = ["Contropartita", "Fatturato"]
-    fig_ctrl = px.pie(
-        by_ctrl, values="Fatturato", names="Contropartita",
-        hole=0.45,
-    )
-    fig_ctrl.update_layout(height=420, margin=dict(t=10, b=10))
-    st.plotly_chart(fig_ctrl, use_container_width=True)
+
+    f_anno = f[f["anno"] == anno_sel]
+
+    col_a, col_b = st.columns([3, 2])
+
+    with col_a:
+        top_cli = (
+            f_anno.groupby("cliente_nome")["importo"]
+            .sum()
+            .reset_index()
+            .sort_values("importo", ascending=False)
+            .head(15)
+        )
+        top_cli.columns = ["Cliente", "Fatturato"]
+        fig_cli = px.bar(
+            top_cli, x="Fatturato", y="Cliente", orientation="h",
+            color="Fatturato", color_continuous_scale="Blues",
+            labels={"Fatturato": "€"},
+            title=f"Top 15 Clienti — {anno_sel}",
+        )
+        fig_cli.update_layout(height=420, margin=dict(t=30, b=10), yaxis=dict(autorange="reversed"))
+        fig_cli.update_traces(texttemplate="€ %{x:,.0f}", textposition="outside")
+        st.plotly_chart(fig_cli, use_container_width=True)
+
+    with col_b:
+        by_ctrl = (
+            f_anno.groupby("contropartita_desc")["importo"]
+            .sum()
+            .reset_index()
+            .sort_values("importo", ascending=False)
+        )
+        by_ctrl.columns = ["Contropartita", "Fatturato"]
+        fig_ctrl = px.pie(
+            by_ctrl, values="Fatturato", names="Contropartita",
+            hole=0.45,
+            title=f"Per Contropartita — {anno_sel}",
+        )
+        fig_ctrl.update_layout(height=420, margin=dict(t=30, b=10))
+        st.plotly_chart(fig_ctrl, use_container_width=True)
 
 st.divider()
 
