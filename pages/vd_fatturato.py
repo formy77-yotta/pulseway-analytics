@@ -237,9 +237,38 @@ else:
 st.divider()
 
 # ------------------------------------------------------------------
-# Tabella dettaglio fatture (ultime 100, filtrata dalla sidebar)
+# Tabella dettaglio fatture
 # ------------------------------------------------------------------
 st.subheader("📋 Dettaglio Fatture")
+
+# Filtri inline sopra la tabella
+fc1, fc2, fc3 = st.columns([2, 2, 1])
+
+data_min = f["data_doc"].min().date()
+data_max = f["data_doc"].max().date()
+
+with fc1:
+    det_date = st.date_input(
+        "Periodo",
+        value=(data_min, data_max),
+        min_value=data_min,
+        max_value=data_max,
+        key="det_date",
+    )
+with fc2:
+    det_tipo = st.multiselect(
+        "Tipo documento",
+        options=["Fattura", "Nota credito"],
+        default=["Fattura", "Nota credito"],
+        key="det_tipo",
+    )
+with fc3:
+    det_limit = st.selectbox(
+        "Mostra",
+        options=[100, 250, 500, 1000],
+        index=0,
+        key="det_limit",
+    )
 
 # Aggrega a livello testata (una riga per documento)
 testate = (
@@ -250,13 +279,20 @@ testate = (
 )
 testate.columns = ["Anno", "Serie", "Num. Doc", "Tipo", "Data", "Cliente", "Importo (€)"]
 testate["Tipo"] = testate["Tipo"].map({"A": "Fattura", "N": "Nota credito"}).fillna(testate["Tipo"])
-testate["Data"] = testate["Data"].dt.date
+testate["Data"] = pd.to_datetime(testate["Data"]).dt.date
 
-st.caption(f"{len(testate):,} documenti trovati — mostro i primi 100")
+# Applica filtri inline
+if len(det_date) == 2:
+    testate = testate[(testate["Data"] >= det_date[0]) & (testate["Data"] <= det_date[1])]
+if det_tipo:
+    testate = testate[testate["Tipo"].isin(det_tipo)]
+
+st.caption(f"{len(testate):,} documenti — mostro gli ultimi {det_limit}")
 st.dataframe(
-    testate.head(100).reset_index(drop=True),
+    testate.head(det_limit).reset_index(drop=True),
     use_container_width=True,
     column_config={
         "Importo (€)": st.column_config.NumberColumn(format="€ %.2f"),
+        "Data": st.column_config.DateColumn(format="DD/MM/YYYY"),
     },
 )
