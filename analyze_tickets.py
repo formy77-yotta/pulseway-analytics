@@ -22,6 +22,8 @@ from google.genai import types
 from config import DATABASE_URL, GEMINI_API_KEY
 from ai_categories_constants import CATEGORIE
 from database import CREATE_CATEGORY_MAPPING
+from tickets_ai_schema import apply_tickets_ai_extra_migrations
+from sqlalchemy import create_engine
 
 # ------------------------------------------------------------------
 # CONFIGURAZIONE
@@ -110,6 +112,8 @@ def init_ai_tables():
             cur.execute(CREATE_AI_TABLES)
             cur.execute(CREATE_CATEGORY_MAPPING)
         conn.commit()
+    eng = create_engine(DATABASE_URL.replace("postgres://", "postgresql://", 1))
+    apply_tickets_ai_extra_migrations(eng)
     logger.success("Tabelle AI inizializzate.")
 
 
@@ -337,6 +341,52 @@ Per ogni ticket restituisci SOLO un oggetto JSON valido con questi campi:
 - ai_quality_notes: (stringa, note sulla qualità del servizio, max 20 parole)
 - ai_summary: (stringa, sommario del ticket in max 15 parole)
 - ai_suggested_action: (stringa, azione suggerita se ticket aperto, null se chiuso)
+- security_issues: (array di stringhe codice problema; vedi ANALISI AGGIUNTIVE)
+- quality_issues: (array di stringhe)
+- communication_issues: (array di stringhe)
+- technical_issues: (array di stringhe)
+- process_issues: (array di stringhe)
+- has_sensitive_data: (boolean)
+- alert_level: (stringa: "critical", "warning" o "ok")
+
+## ANALISI AGGIUNTIVE OBBLIGATORIE
+
+Oltre alla categorizzazione, per ogni ticket analizza e aggiungi questi campi al JSON:
+
+- security_issues: array di problemi di sicurezza trovati
+  Cerca: password in chiaro nel testo, credenziali, token,
+  dati personali sensibili (CF, IBAN, dati medici),
+  accessi condivisi. Es: ["password_in_chiaro", "dati_personali"]
+  Array vuoto se nessun problema.
+
+- quality_issues: array di problemi di qualità trovati
+  Cerca: risposta generica senza dettagli, lavoro non documentato,
+  ticket chiuso senza descrizione risoluzione, risposta monosillabica.
+  Es: ["lavoro_non_documentato", "risposta_generica"]
+
+- communication_issues: array di problemi comunicazione
+  Cerca: tono inappropriato o scortese, nessuna risposta al cliente,
+  risposta solo interna senza aggiornare il cliente.
+  Es: ["nessun_aggiornamento_cliente"]
+
+- technical_issues: array di problemi tecnici
+  Cerca: soluzione temporanea ("riavviato", "per ora funziona"),
+  causa radice non identificata, problema non risolto definitivamente.
+  Es: ["soluzione_temporanea", "causa_radice_sconosciuta"]
+
+- process_issues: array di problemi di processo
+  Cerca: ticket chiuso senza nota di risoluzione,
+  ticket riaperto (presenza di "riaperto" o "ancora" nel testo),
+  tempo di risposta assente.
+  Es: ["chiuso_senza_risoluzione"]
+
+- has_sensitive_data: boolean, TRUE se ci sono dati sensibili
+  (password, credenziali, CF, IBAN, numeri carta)
+
+- alert_level: stringa, livello di attenzione complessivo:
+  "critical" = problemi sicurezza o dati sensibili
+  "warning"  = problemi qualità o processo
+  "ok"       = nessun problema rilevante
 
 Rispondi SOLO con un array JSON: [{{...}}, {{...}}]
 Nessun testo prima o dopo. JSON valido e completo.
@@ -423,6 +473,23 @@ def analyze_batch(
 # SALVATAGGIO RISULTATI
 # ------------------------------------------------------------------
 
+def _coerce_str_list(val) -> list:
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(x) for x in val]
+    return []
+
+
+def _coerce_alert_level(val) -> str:
+    if not val or not isinstance(val, str):
+        return "ok"
+    v = val.strip().lower()
+    if v in ("critical", "warning", "ok"):
+        return v
+    return "ok"
+
+
 def save_results(results: list[dict], model_name: str, tok_in: int, tok_out: int):
     if not results:
         return
@@ -435,6 +502,9 @@ def save_results(results: list[dict], model_name: str, tok_in: int, tok_out: int
         ai_resolution_quality, ai_communication_quality,
         ai_resolution_clear, ai_quality_notes,
         ai_summary, ai_suggested_action,
+        security_issues, quality_issues, communication_issues,
+        technical_issues, process_issues,
+        has_sensitive_data, alert_level,
         model_used, tokens_input, tokens_output, analyzed_at
     ) VALUES (
         %(id)s, %(ai_category)s, %(ai_subcategory)s, %(ai_confidence)s,
@@ -443,6 +513,9 @@ def save_results(results: list[dict], model_name: str, tok_in: int, tok_out: int
         %(ai_resolution_quality)s, %(ai_communication_quality)s,
         %(ai_resolution_clear)s, %(ai_quality_notes)s,
         %(ai_summary)s, %(ai_suggested_action)s,
+        %(security_issues)s, %(quality_issues)s, %(communication_issues)s,
+        %(technical_issues)s, %(process_issues)s,
+        %(has_sensitive_data)s, %(alert_level)s,
         %(model_used)s, %(tokens_input)s, %(tokens_output)s, NOW()
     )
     ON CONFLICT (ticket_id) DO UPDATE SET
@@ -461,6 +534,13 @@ def save_results(results: list[dict], model_name: str, tok_in: int, tok_out: int
         ai_quality_notes        = EXCLUDED.ai_quality_notes,
         ai_summary              = EXCLUDED.ai_summary,
         ai_suggested_action     = EXCLUDED.ai_suggested_action,
+        security_issues         = EXCLUDED.security_issues,
+        quality_issues          = EXCLUDED.quality_issues,
+        communication_issues    = EXCLUDED.communication_issues,
+        technical_issues        = EXCLUDED.technical_issues,
+        process_issues          = EXCLUDED.process_issues,
+        has_sensitive_data      = EXCLUDED.has_sensitive_data,
+        alert_level             = EXCLUDED.alert_level,
         model_used              = EXCLUDED.model_used,
         tokens_input            = EXCLUDED.tokens_input,
         tokens_output           = EXCLUDED.tokens_output,
@@ -489,6 +569,13 @@ def save_results(results: list[dict], model_name: str, tok_in: int, tok_out: int
             "ai_quality_notes":         r.get("ai_quality_notes"),
             "ai_summary":               r.get("ai_summary"),
             "ai_suggested_action":      r.get("ai_suggested_action"),
+            "security_issues":          _coerce_str_list(r.get("security_issues")),
+            "quality_issues":             _coerce_str_list(r.get("quality_issues")),
+            "communication_issues":       _coerce_str_list(r.get("communication_issues")),
+            "technical_issues":           _coerce_str_list(r.get("technical_issues")),
+            "process_issues":             _coerce_str_list(r.get("process_issues")),
+            "has_sensitive_data":         bool(r.get("has_sensitive_data")),
+            "alert_level":                _coerce_alert_level(r.get("alert_level")),
             "model_used":               model_name,
             "tokens_input":             tok_in,
             "tokens_output":            tok_out,

@@ -18,6 +18,7 @@ from queue_ticket_filter import (
     sql_ai_categories_join_filtered,
     sql_ai_categories_join_unfiltered,
 )
+from tickets_ai_schema import apply_tickets_ai_extra_migrations
 
 
 # ------------------------------------------------------------------
@@ -32,7 +33,9 @@ def load_queue_config_sidebar() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_ai_ticket_data() -> pd.DataFrame:
-    engine = create_engine(DATABASE_URL)
+    url = (DATABASE_URL or "").replace("postgres://", "postgresql://", 1)
+    engine = create_engine(url)
+    apply_tickets_ai_extra_migrations(engine)
     try:
         df = pd.read_sql(sql_ai_categories_join_filtered(), engine)
     except Exception:
@@ -65,6 +68,23 @@ def load_ticket_notes(ticket_id: int) -> pd.DataFrame:
     return df
 
 
+def issues_nonempty(val) -> bool:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return False
+    if isinstance(val, (list, tuple)):
+        return len(val) > 0
+    return False
+
+
+def alert_level_display(level) -> str:
+    a = str(level or "ok").strip().lower()
+    if a == "critical":
+        return "🔴 critical"
+    if a == "warning":
+        return "🟡 warning"
+    return "🟢 ok"
+
+
 def explode_pattern_tags(series: pd.Series) -> pd.Series:
     out: list[str] = []
     for v in series.dropna():
@@ -82,7 +102,8 @@ def explode_pattern_tags(series: pd.Series) -> pd.Series:
 @st.dialog("🎫 Dettaglio Ticket", width="large")
 def show_ticket_detail(ticket_id: int) -> None:
     """Popup con dettaglio ticket e conversazione."""
-    engine = create_engine(DATABASE_URL)
+    url = (DATABASE_URL or "").replace("postgres://", "postgresql://", 1)
+    engine = create_engine(url)
 
     ticket_df = pd.read_sql(
         text(
@@ -94,7 +115,10 @@ def show_ticket_detail(ticket_id: int) -> None:
                 ai.ai_resolution_quality, ai.ai_communication_quality,
                 ai.ai_quality_notes, ai.ai_suggested_action,
                 ai.ai_pattern_tags, ai.ai_urgency_score,
-                ai.category_match, ai.category_note
+                ai.category_match, ai.category_note,
+                ai.security_issues, ai.quality_issues, ai.communication_issues,
+                ai.technical_issues, ai.process_issues,
+                ai.has_sensitive_data, ai.alert_level
             FROM tickets t
             LEFT JOIN tickets_ai ai ON ai.ticket_id = t.id
             WHERE t.id = :tid
@@ -237,6 +261,32 @@ def show_ticket_detail(ticket_id: int) -> None:
                 st.markdown("---")
                 st.markdown("**💡 Azione suggerita:**")
                 st.info(str(ticket["ai_suggested_action"]))
+
+            st.markdown("---")
+            st.subheader("⚠️ Alert")
+            if ticket.get("has_sensitive_data"):
+                st.error(
+                    "**Dati sensibili rilevati:** possibili password, credenziali, CF, IBAN, "
+                    "numeri di carta o altre informazioni riservate nel contenuto del ticket."
+                )
+            al = str(ticket.get("alert_level") or "ok").lower()
+            st.markdown(f"**Livello alert:** {alert_level_display(al)}")
+
+            issue_blocks = [
+                ("🔴 Sicurezza", "security_issues"),
+                ("🟡 Qualità", "quality_issues"),
+                ("🟠 Comunicazione", "communication_issues"),
+                ("🔵 Tecnico", "technical_issues"),
+                ("⚫ Processo", "process_issues"),
+            ]
+            any_issue = False
+            for label, key in issue_blocks:
+                arr = ticket.get(key)
+                if issues_nonempty(arr):
+                    any_issue = True
+                    st.markdown(f"**{label}:** `{', '.join(str(x) for x in arr)}`")
+            if not any_issue and not ticket.get("has_sensitive_data"):
+                st.caption("Nessun problema aggiuntivo segnalato dall’analisi.")
         else:
             st.info("Ticket non ancora analizzato dall'AI.")
 
@@ -316,6 +366,24 @@ if f.empty:
     st.warning("Nessun ticket con i filtri selezionati.")
     st.stop()
 
+_issue_cols = [
+    "security_issues",
+    "quality_issues",
+    "communication_issues",
+    "technical_issues",
+    "process_issues",
+]
+for c in _issue_cols:
+    if c not in f.columns:
+        f[c] = None
+if "alert_level" not in f.columns:
+    f["alert_level"] = "ok"
+else:
+    f = f.copy()
+    f["alert_level"] = f["alert_level"].fillna("ok")
+if "has_sensitive_data" not in f.columns:
+    f["has_sensitive_data"] = False
+
 # ------------------------------------------------------------------
 # 1. KPI
 # ------------------------------------------------------------------
@@ -340,6 +408,42 @@ k5.metric(
     "Media qualità comunicazione",
     f"{mean_comm:.2f}" if pd.notna(mean_comm) else "N/D",
 )
+
+st.subheader("🚨 Alert e Problemi Rilevati")
+
+
+def _count_issue(col: str) -> int:
+    if col not in f.columns:
+        return 0
+    return int(f[col].apply(issues_nonempty).sum())
+
+
+z1, z2, z3, z4, z5 = st.columns(5)
+z1.metric("🔴 Sicurezza", _count_issue("security_issues"))
+z2.metric("🟡 Qualità", _count_issue("quality_issues"))
+z3.metric("🟠 Comunicazione", _count_issue("communication_issues"))
+z4.metric("🔵 Tecnico", _count_issue("technical_issues"))
+z5.metric("⚫ Processo", _count_issue("process_issues"))
+
+st.caption(
+    "Conteggi: ticket con almeno un elemento negli array di problemi (nel filtro corrente)."
+)
+
+_sk = (
+    f["alert_level"]
+    .astype(str)
+    .str.lower()
+    .map({"critical": 0, "warning": 1, "ok": 2})
+    .fillna(2)
+)
+alert_tbl = f.assign(_sk=_sk).sort_values("_sk").drop(columns=["_sk"])
+alert_display = alert_tbl[
+    ["ticket_number", "title", "account_name", "alert_level"]
+].copy()
+alert_display["alert_level"] = (
+    alert_display["alert_level"].fillna("ok").astype(str).apply(alert_level_display)
+)
+st.dataframe(alert_display, use_container_width=True, hide_index=True)
 
 st.divider()
 
@@ -405,15 +509,16 @@ if disc_view.empty:
         else "Nessun ticket nei filtri correnti."
     )
 else:
-    h = st.columns([0.9, 1.0, 1.1, 2.0, 1.0, 0.5, 0.65, 0.35])
+    h = st.columns([0.85, 0.95, 1.0, 1.75, 0.95, 0.45, 0.75, 0.55, 0.35])
     h[0].markdown("**Ticket**")
     h[1].markdown("**Apertura**")
     h[2].markdown("**Cliente**")
     h[3].markdown("**Titolo**")
     h[4].markdown("**Cat. AI**")
     h[5].markdown("**Match**")
-    h[6].markdown("**Conf.**")
-    h[7].markdown("**Vedi**")
+    h[6].markdown("**Alert**")
+    h[7].markdown("**Conf.**")
+    h[8].markdown("**Vedi**")
 
     for idx, row in disc_view.iterrows():
         tid = int(row["id"])
@@ -435,15 +540,18 @@ else:
         if solo_discrepanze and pd.notna(conf) and float(conf) > 0.8:
             title_s = f"🔴 {title_s}"
 
-        cols = st.columns([0.9, 1.0, 1.1, 2.0, 1.0, 0.5, 0.65, 0.35])
+        al_disp = alert_level_display(row.get("alert_level"))
+
+        cols = st.columns([0.85, 0.95, 1.0, 1.75, 0.95, 0.45, 0.75, 0.55, 0.35])
         cols[0].write(row.get("ticket_number") or "")
         cols[1].write(od_s)
         cols[2].write(str(row.get("account_name") or ""))
         cols[3].write(title_s)
         cols[4].write(str(row.get("ai_category") or ""))
         cols[5].write(match_s)
-        cols[6].write(conf_s)
-        if cols[7].button("👁️", key=f"disc_detail_{tid}_{idx}", help="Dettaglio ticket"):
+        cols[6].markdown(al_disp)
+        cols[7].write(conf_s)
+        if cols[8].button("👁️", key=f"disc_detail_{tid}_{idx}", help="Dettaglio ticket"):
             show_ticket_detail(tid)
 
 st.divider()

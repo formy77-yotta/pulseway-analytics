@@ -67,6 +67,13 @@ def sql_ai_categories_join_filtered() -> str:
         ai.ai_quality_notes,
         ai.ai_summary,
         ai.ai_suggested_action,
+        ai.security_issues,
+        ai.quality_issues,
+        ai.communication_issues,
+        ai.technical_issues,
+        ai.process_issues,
+        ai.has_sensitive_data,
+        ai.alert_level,
         ai.analyzed_at
     FROM tickets_ai ai
     INNER JOIN tickets t ON t.id = ai.ticket_id
@@ -103,6 +110,13 @@ def sql_ai_categories_join_unfiltered() -> str:
         ai.ai_quality_notes,
         ai.ai_summary,
         ai.ai_suggested_action,
+        ai.security_issues,
+        ai.quality_issues,
+        ai.communication_issues,
+        ai.technical_issues,
+        ai.process_issues,
+        ai.has_sensitive_data,
+        ai.alert_level,
         ai.analyzed_at
     FROM tickets_ai ai
     INNER JOIN tickets t ON t.id = ai.ticket_id
