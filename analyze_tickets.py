@@ -3,7 +3,7 @@ analyze_tickets.py — Analisi AI ticket con Google Gemini
 Categorizzazione, rilevamento pattern, qualità assistenza.
 
 Esegui:
-    python analyze_tickets.py              # analizza tutti i ticket non ancora analizzati
+    python analyze_tickets.py              # non analizzati o con note più recenti dell'ultima analisi
     python analyze_tickets.py --days 7     # solo ticket degli ultimi 7 giorni
     python analyze_tickets.py --force      # rianalizza tutto
     python analyze_tickets.py --dry-run    # test senza salvare
@@ -221,7 +221,14 @@ def apply_mapping_to_results(
 # ------------------------------------------------------------------
 
 def get_tickets_to_analyze(days: int = None, force: bool = False) -> list[dict]:
-    """Carica ticket con le loro note per l'analisi."""
+    """
+    Carica ticket con le loro note per l'analisi.
+
+    Con force=False analizza se:
+    - il ticket non è ancora in tickets_ai, oppure
+    - esiste almeno una nota con created_on successivo a tickets_ai.analyzed_at.
+    Con force=True vengono inclusi tutti i ticket nel filtro data (rianalisi completa).
+    """
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
 
@@ -236,7 +243,15 @@ def get_tickets_to_analyze(days: int = None, force: bool = False) -> list[dict]:
                 date_filter = "AND t.open_date >= '2026-01-01'"
 
             already_filter = "" if force else """
-                AND t.id NOT IN (SELECT ticket_id FROM tickets_ai)
+                AND (
+                    t.id NOT IN (SELECT ticket_id FROM tickets_ai)
+                    OR t.id IN (
+                        SELECT DISTINCT n.ticket_id
+                        FROM ticket_notes n
+                        INNER JOIN tickets_ai ai ON ai.ticket_id = n.ticket_id
+                        WHERE n.created_on > ai.analyzed_at
+                    )
+                )
             """
 
             cur.execute(f"""
