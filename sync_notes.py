@@ -75,16 +75,39 @@ def init_db():
 # PULIZIA TESTO
 # ------------------------------------------------------------------
 
-# Pattern testo automatico da rimuovere
+# Pattern testo automatico / firme / antispam da rimuovere
 AUTO_PATTERNS = [
     r'Ticket has been assigned to\s+.*?\s+by\s+[^<\n]+',
     r'Ticket status changed.*?(?=\n|$)',
     r'Ticket priority changed.*?(?=\n|$)',
     r'Ticket queue changed.*?(?=\n|$)',
+    # Antispam INKY e simili
+    r'Safe\s*Spam\s*Phish\s*More\s*\.{3}\s*FAQ\s*Sicurezza\s*INKY[^\n]*',
+    r'INKY\s*sta\s*verificando\s*\.\.\.',
+    r'Graymail\s*Spam\s*Phish\s*More\s*\.\.\.',
+    r'\[INKY[^\]]*\]',
+    # Firme email tipiche
+    r'(?:Tel|Mob|Cell|Fax|Phone)[\s.:]*[\+\d\s\-\(\)]{7,20}',
+    r'P\.?\s*IVA[\s:]*[\d\s]{11,15}',
+    r'C\.?\s*F\.?[\s:]*[A-Za-z0-9]{16}',
+    r'Via\s+\w+[\s,]+\d+[\s,]+\d{5}',
+    # Separatori di citazione email
+    r'Il giorno .{10,50} ha scritto:',
+    r'On .{10,50} wrote:',
+    # Footer aziendali comuni (tre righe dopo formula di chiusura)
+    r'(?:Cordiali saluti|Distinti saluti|Saluti|Regards|Best regards)[^\n]*\n.*?\n.*?\n',
 ]
 
+# Pattern che possono attraversare più righe (disclaimer, blocchi citazione)
+AUTO_PATTERNS_DOTALL = [
+    r'(?:Questo messaggio|This email|La presente email).{0,300}(?:riservatezza|confidential|legge)',
+    r'(?:Se hai ricevuto|If you received).{0,200}(?:eliminare|delete)',
+    r'-{5,}.*?(?:Messaggio originale|Original Message|From:|Da:).*?-{5,}',
+]
+
+
 def clean_html(html: str) -> str:
-    """Rimuove HTML, testo automatico e normalizza."""
+    """Rimuove HTML, testo automatico, firme, antispam e normalizza."""
     if not html:
         return ""
 
@@ -106,15 +129,34 @@ def clean_html(html: str) -> str:
     text = text.replace('&quot;', '"')
     text = text.replace('&#39;', "'")
 
-    # Rimuovi testo automatico di assegnazione
     for pattern in AUTO_PATTERNS:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+
+    for pattern in AUTO_PATTERNS_DOTALL:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
 
     # Normalizza spazi multipli e newline
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'[ \t]+', ' ', text)
     text = '\n'.join(line.strip() for line in text.split('\n'))
 
+    # Rimuovi righe troppo corte (probabilmente residui di formattazione)
+    lines = text.split('\n')
+    lines = [ln for ln in lines if len(ln.split()) >= 3]
+    text = '\n'.join(lines)
+
+    # Rimuovi righe duplicate (citazioni ripetute)
+    lines = text.split('\n')
+    seen: set[str] = set()
+    unique_lines: list[str] = []
+    for line in lines:
+        s = line.strip()
+        if s not in seen:
+            seen.add(s)
+            unique_lines.append(line)
+    text = '\n'.join(unique_lines)
+
+    text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
 
