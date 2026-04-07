@@ -4,6 +4,8 @@ sd_ai_categories.py — Dashboard analisi AI categorizzazione ticket (Gemini / t
 
 from __future__ import annotations
 
+import html
+import re
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -75,6 +77,168 @@ def explode_pattern_tags(series: pd.Series) -> pd.Series:
                 if t:
                     out.append(t)
     return pd.Series(out, dtype=object)
+
+
+@st.dialog("🎫 Dettaglio Ticket", width="large")
+def show_ticket_detail(ticket_id: int) -> None:
+    """Popup con dettaglio ticket e conversazione."""
+    engine = create_engine(DATABASE_URL)
+
+    ticket_df = pd.read_sql(
+        text(
+            """
+            SELECT
+                t.*,
+                ai.ai_category, ai.ai_subcategory, ai.ai_confidence,
+                ai.ai_summary, ai.ai_root_cause, ai.ai_is_recurring,
+                ai.ai_resolution_quality, ai.ai_communication_quality,
+                ai.ai_quality_notes, ai.ai_suggested_action,
+                ai.ai_pattern_tags, ai.ai_urgency_score,
+                ai.category_match, ai.category_note
+            FROM tickets t
+            LEFT JOIN tickets_ai ai ON ai.ticket_id = t.id
+            WHERE t.id = :tid
+            """
+        ),
+        engine,
+        params={"tid": ticket_id},
+    )
+    if ticket_df.empty:
+        st.error("Ticket non trovato.")
+        return
+
+    ticket = ticket_df.iloc[0]
+
+    notes = pd.read_sql(
+        text(
+            """
+            SELECT note_direction, details_clean, created_by_name, created_on
+            FROM ticket_notes
+            WHERE ticket_id = :tid
+            ORDER BY created_on ASC
+            """
+        ),
+        engine,
+        params={"tid": ticket_id},
+    )
+    if "created_on" in notes.columns:
+        notes["created_on"] = pd.to_datetime(notes["created_on"], utc=True, errors="coerce")
+
+    col1, col2 = st.columns([3, 2])
+
+    with col1:
+        st.subheader(f"#{ticket['ticket_number']} — {ticket['title']}")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Stato", ticket.get("status_name") or "—")
+        c2.metric("Priorità", ticket.get("priority_name") or "—")
+        c3.metric("Cliente", ticket.get("account_name") or "—")
+
+        c4, c5 = st.columns(2)
+        c4.metric("Tecnico", ticket.get("assignee_name") or "Non assegnato")
+        od = ticket.get("open_date")
+        c5.metric("Apertura", str(od)[:10] if pd.notna(od) else "—")
+
+        details_raw = ticket.get("details")
+        if details_raw and str(details_raw).strip():
+            with st.expander("📄 Descrizione", expanded=True):
+                desc = re.sub(r"<[^>]+>", " ", str(details_raw))
+                desc = re.sub(r"\s+", " ", desc).strip()
+                st.write(desc[:1000])
+
+        st.markdown("---")
+        st.subheader("💬 Conversazione")
+
+        if notes.empty:
+            st.info("Nessuna nota disponibile per questo ticket.")
+        else:
+            for _, note in notes.iterrows():
+                is_internal = note.get("note_direction") == "internal"
+                author = html.escape(str(note.get("created_by_name") or "—"))
+                created = str(note.get("created_on") or "")[:16]
+                body = html.escape(str(note.get("details_clean") or "")).replace("\n", "<br>")
+
+                if is_internal:
+                    st.markdown(
+                        f"""
+                    <div style="background:#f0f0f0; padding:10px;
+                                border-radius:8px; margin:5px 0;
+                                border-left:4px solid #888;">
+                    <small>🔒 <b>{author}</b> — {created}</small><br>
+                    {body}
+                    </div>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"""
+                    <div style="background:#e8f4fd; padding:10px;
+                                border-radius:8px; margin:5px 0;
+                                border-left:4px solid #1f77b4;">
+                    <small>📧 <b>{author}</b> — {created}</small><br>
+                    {body}
+                    </div>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+
+    with col2:
+        st.subheader("🤖 Analisi AI")
+
+        if pd.notna(ticket.get("ai_category")):
+            if ticket.get("ai_summary"):
+                st.info(f"📝 {ticket['ai_summary']}")
+
+            match_icon = "✅" if ticket.get("category_match") else "⚠️"
+            st.markdown(f"**Categoria operatore:** {ticket.get('issue_type_name') or '—'}")
+            st.markdown(f"**Categoria AI:** {match_icon} {ticket.get('ai_category')}")
+            if ticket.get("category_note"):
+                st.caption(str(ticket["category_note"]))
+
+            st.markdown("---")
+            st.markdown("**Qualità servizio:**")
+
+            res_q = ticket.get("ai_resolution_quality")
+            com_q = ticket.get("ai_communication_quality")
+
+            if pd.notna(res_q) and res_q is not None:
+                rq = int(res_q)
+                stars = "⭐" * max(0, min(5, rq))
+                st.markdown(f"Risoluzione: {stars} ({rq}/5)")
+            if pd.notna(com_q) and com_q is not None:
+                cq = int(com_q)
+                stars = "⭐" * max(0, min(5, cq))
+                st.markdown(f"Comunicazione: {stars} ({cq}/5)")
+
+            if ticket.get("ai_quality_notes"):
+                st.caption(f"💬 {ticket['ai_quality_notes']}")
+
+            st.markdown("---")
+            if ticket.get("ai_is_recurring"):
+                st.warning("🔄 Ticket ricorrente")
+            if ticket.get("ai_root_cause"):
+                st.markdown(f"**Causa radice:** {ticket['ai_root_cause']}")
+            if pd.notna(ticket.get("ai_urgency_score")):
+                urgency = int(ticket["ai_urgency_score"])
+                color = "🔴" if urgency >= 4 else "🟡" if urgency == 3 else "🟢"
+                st.markdown(f"**Urgenza:** {color} {urgency}/5")
+
+            tags = ticket.get("ai_pattern_tags")
+            tag_list: list[str] = []
+            if isinstance(tags, list):
+                tag_list = [str(t) for t in tags]
+            elif isinstance(tags, str) and tags.strip():
+                tag_list = [tags]
+            if tag_list:
+                st.markdown("**Tag:** " + " ".join(f"`{html.escape(t)}`" for t in tag_list))
+
+            if ticket.get("ai_suggested_action"):
+                st.markdown("---")
+                st.markdown("**💡 Azione suggerita:**")
+                st.info(str(ticket["ai_suggested_action"]))
+        else:
+            st.info("Ticket non ancora analizzato dall'AI.")
 
 
 # ------------------------------------------------------------------
@@ -241,56 +405,46 @@ if disc_view.empty:
         else "Nessun ticket nei filtri correnti."
     )
 else:
-    show_disc = disc_view[
-        [
-            "ticket_number",
-            "open_date",
-            "account_name",
-            "title",
-            "issue_type_name",
-            "ai_category",
-            "category_match",
-            "ai_confidence",
-            "category_note",
-        ]
-    ].rename(
-        columns={
-            "account_name": "cliente",
-            "issue_type_name": "categoria_operatore",
-            "ai_category": "categoria_AI",
-        }
-    )
-    if "open_date" in show_disc.columns:
-        show_disc = show_disc.copy()
-        show_disc["open_date"] = pd.to_datetime(show_disc["open_date"], utc=True, errors="coerce").dt.strftime(
-            "%Y-%m-%d %H:%M"
-        )
+    h = st.columns([0.9, 1.0, 1.1, 2.0, 1.0, 0.5, 0.65, 0.35])
+    h[0].markdown("**Ticket**")
+    h[1].markdown("**Apertura**")
+    h[2].markdown("**Cliente**")
+    h[3].markdown("**Titolo**")
+    h[4].markdown("**Cat. AI**")
+    h[5].markdown("**Match**")
+    h[6].markdown("**Conf.**")
+    h[7].markdown("**Vedi**")
 
-    def highlight_match_col(series: pd.Series) -> list[str]:
-        out: list[str] = []
-        for v in series:
-            if pd.isna(v):
-                out.append("")
-            elif v == True:  # noqa: E712
-                out.append("background-color: #c8e6c9")
-            elif v == False:  # noqa: E712
-                out.append("background-color: #ffcdd2")
-            else:
-                out.append("")
-        return out
+    for idx, row in disc_view.iterrows():
+        tid = int(row["id"])
+        od = row.get("open_date")
+        if pd.notna(od):
+            od_s = pd.to_datetime(od, utc=True, errors="coerce").strftime("%Y-%m-%d %H:%M")
+        else:
+            od_s = "—"
+        conf = row.get("ai_confidence")
+        conf_s = f"{float(conf):.0%}" if pd.notna(conf) else "—"
+        cm = row.get("category_match")
+        if pd.isna(cm):
+            match_s = "—"
+        elif bool(cm):
+            match_s = "✅"
+        else:
+            match_s = "⚠️"
+        title_s = str(row.get("title") or "")[:50]
+        if solo_discrepanze and pd.notna(conf) and float(conf) > 0.8:
+            title_s = f"🔴 {title_s}"
 
-    def highlight_high_conf(row: pd.Series) -> list[str]:
-        conf = row["ai_confidence"]
-        if pd.notna(conf) and conf > 0.8:
-            return ["background-color: #ffcccc"] * len(row)
-        return [""] * len(row)
-
-    if solo_discrepanze:
-        styled = show_disc.style.apply(highlight_high_conf, axis=1)
-    else:
-        styled = show_disc.style.apply(highlight_match_col, subset=["category_match"])
-
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+        cols = st.columns([0.9, 1.0, 1.1, 2.0, 1.0, 0.5, 0.65, 0.35])
+        cols[0].write(row.get("ticket_number") or "")
+        cols[1].write(od_s)
+        cols[2].write(str(row.get("account_name") or ""))
+        cols[3].write(title_s)
+        cols[4].write(str(row.get("ai_category") or ""))
+        cols[5].write(match_s)
+        cols[6].write(conf_s)
+        if cols[7].button("👁️", key=f"disc_detail_{tid}_{idx}", help="Dettaglio ticket"):
+            show_ticket_detail(tid)
 
 st.divider()
 
@@ -420,21 +574,27 @@ st.markdown("**Ticket con bassa qualità risoluzione (≤ 2)**")
 if low_q.empty:
     st.caption("Nessuno nel filtro corrente.")
 else:
-    st.dataframe(
-        low_q[
-            [
-                "ticket_number",
-                "title",
-                "assignee_name",
-                "account_name",
-                "ai_resolution_quality",
-                "ai_communication_quality",
-                "ai_summary",
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
+    hl = st.columns([0.9, 2.2, 1.2, 1.0, 0.6, 1.4, 0.35])
+    hl[0].markdown("**Ticket**")
+    hl[1].markdown("**Titolo**")
+    hl[2].markdown("**Tecnico**")
+    hl[3].markdown("**Cliente**")
+    hl[4].markdown("**Q. ris.**")
+    hl[5].markdown("**Sommario AI**")
+    hl[6].markdown("**Vedi**")
+
+    for idx, row in low_q.iterrows():
+        tid = int(row["id"])
+        cols = st.columns([0.9, 2.2, 1.2, 1.0, 0.6, 1.4, 0.35])
+        cols[0].write(row.get("ticket_number") or "")
+        cols[1].write(str(row.get("title") or "")[:50])
+        cols[2].write(str(row.get("assignee_name") or ""))
+        cols[3].write(str(row.get("account_name") or ""))
+        rq = row.get("ai_resolution_quality")
+        cols[4].write(str(int(rq)) if pd.notna(rq) else "—")
+        cols[5].write(str(row.get("ai_summary") or "")[:60])
+        if cols[6].button("👁️", key=f"lowq_detail_{tid}_{idx}", help="Dettaglio ticket"):
+            show_ticket_detail(tid)
 
 st.divider()
 
@@ -465,21 +625,34 @@ st.markdown("**Ticket urgenza 5 non ancora risolti**")
 if urgent_open.empty:
     st.caption("Nessuno.")
 else:
-    st.dataframe(
-        urgent_open[
-            [
-                "ticket_number",
-                "title",
-                "account_name",
-                "assignee_name",
-                "status_name",
-                "open_date",
-                "ai_summary",
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
+    uh = st.columns([0.9, 2.0, 1.1, 1.0, 1.0, 0.9, 1.0, 0.35])
+    uh[0].markdown("**Ticket**")
+    uh[1].markdown("**Titolo**")
+    uh[2].markdown("**Cliente**")
+    uh[3].markdown("**Tecnico**")
+    uh[4].markdown("**Stato**")
+    uh[5].markdown("**Apertura**")
+    uh[6].markdown("**Sommario**")
+    uh[7].markdown("**Vedi**")
+
+    for idx, row in urgent_open.iterrows():
+        tid = int(row["id"])
+        od = row.get("open_date")
+        od_s = (
+            pd.to_datetime(od, utc=True, errors="coerce").strftime("%Y-%m-%d")
+            if pd.notna(od)
+            else "—"
+        )
+        cols = st.columns([0.9, 2.0, 1.1, 1.0, 1.0, 0.9, 1.0, 0.35])
+        cols[0].write(row.get("ticket_number") or "")
+        cols[1].write(str(row.get("title") or "")[:50])
+        cols[2].write(str(row.get("account_name") or ""))
+        cols[3].write(str(row.get("assignee_name") or ""))
+        cols[4].write(str(row.get("status_name") or ""))
+        cols[5].write(od_s)
+        cols[6].write(str(row.get("ai_summary") or "")[:40])
+        if cols[7].button("👁️", key=f"urg_detail_{tid}_{idx}", help="Dettaglio ticket"):
+            show_ticket_detail(tid)
 
 st.divider()
 
