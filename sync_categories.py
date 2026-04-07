@@ -24,40 +24,10 @@ def _issue_name(obj: dict | None) -> str:
     return str(oid) if oid is not None else ""
 
 
-def _parent_category_name(sub: dict, id_to_name: dict[int, str]) -> str:
-    for key in (
-        "issueTypeId",
-        "issue_type_id",
-        "parentIssueTypeId",
-        "parentId",
-        "IssueTypeId",
-    ):
-        pid = sub.get(key)
-        if pid is not None:
-            try:
-                return id_to_name.get(int(pid), "") or ""
-            except (TypeError, ValueError):
-                pass
-    pit = sub.get("issueType") or sub.get("parentIssueType")
-    if isinstance(pit, dict):
-        return _issue_name(pit)
-    return ""
-
-
 def run_sync() -> int:
     """Esegue sync API → DB. Ritorna quante INSERT hanno inserito una nuova riga."""
     client = PulsewayClient()
     issue_types = client.get_issue_types() or []
-    sub_types = client.get_sub_issue_types() or []
-
-    id_to_name: dict[int, str] = {}
-    for it in issue_types:
-        iid = it.get("id")
-        if iid is not None:
-            try:
-                id_to_name[int(iid)] = _issue_name(it) or str(iid)
-            except (TypeError, ValueError):
-                pass
 
     inserted = 0
     with get_conn() as conn:
@@ -68,6 +38,7 @@ def run_sync() -> int:
                 pc = _issue_name(it)
                 if not pc:
                     continue
+
                 cur.execute(
                     """
                     INSERT INTO category_mapping
@@ -79,24 +50,37 @@ def run_sync() -> int:
                 )
                 inserted += cur.rowcount
 
-            for sub in sub_types:
-                sn = _issue_name(sub)
-                pc = _parent_category_name(sub, id_to_name)
-                if not pc:
-                    pc = _issue_name(sub.get("issueType") or sub.get("parent")) or "—"
-                if not sn:
-                    sn = str(sub.get("id", "—"))
+                iid = it.get("id")
+                if iid is None:
+                    continue
+                try:
+                    iid_int = int(iid)
+                except (TypeError, ValueError):
+                    logger.warning(f"sync_categories: id issue type non valido: {iid}")
+                    continue
 
-                cur.execute(
-                    """
-                    INSERT INTO category_mapping
-                        (pulseway_category, pulseway_sub, ai_category, is_equivalent, note)
-                    VALUES (%s, %s, NULL, TRUE, NULL)
-                    ON CONFLICT (pulseway_category, pulseway_sub) DO NOTHING
-                    """,
-                    (pc, sn),
-                )
-                inserted += cur.rowcount
+                try:
+                    sub_types = client.get_sub_issue_types(iid_int) or []
+                except Exception as e:
+                    logger.warning(
+                        f"sync_categories: sottocategorie per issue_type_id={iid_int} ({pc}): {e}"
+                    )
+                    continue
+
+                for sub in sub_types:
+                    sn = _issue_name(sub)
+                    if not sn:
+                        sn = str(sub.get("id", "—"))
+                    cur.execute(
+                        """
+                        INSERT INTO category_mapping
+                            (pulseway_category, pulseway_sub, ai_category, is_equivalent, note)
+                        VALUES (%s, %s, NULL, TRUE, NULL)
+                        ON CONFLICT (pulseway_category, pulseway_sub) DO NOTHING
+                        """,
+                        (pc, sn),
+                    )
+                    inserted += cur.rowcount
 
     logger.success(f"sync_categories: nuove righe inserite: {inserted}")
     return inserted

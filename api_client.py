@@ -93,12 +93,12 @@ class PulsewayClient:
 
     def get_issue_types(self) -> list[dict]:
         """Scarica tutte le categorie (IssueType) da Pulseway."""
-        data = self._get("/v2/servicedesk/issuetypes/lookup")
+        data = self._get("/v2/system/issuetypes/lookup")
         return data.get("result", [])
 
-    def get_sub_issue_types(self) -> list[dict]:
-        """Scarica tutte le sottocategorie da Pulseway."""
-        data = self._get("/v2/servicedesk/subissuetypes/lookup")
+    def get_sub_issue_types(self, issue_type_id: int) -> list[dict]:
+        """Scarica le sottocategorie per una IssueType (per id)."""
+        data = self._get(f"/v2/system/issuetypes/{issue_type_id}/issuesubtypes/lookup")
         return data.get("result", [])
 
     # ------------------------------------------------------------------
