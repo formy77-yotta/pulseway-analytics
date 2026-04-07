@@ -14,6 +14,11 @@ pg = st.navigation({
         st.Page("pages/sd_dashboard.py",      title="Dashboard",      icon="📊"),
         st.Page("pages/sd_ai.py",             title="AI Analytics",   icon="🤖"),
         st.Page("pages/sd_ai_categories.py",  title="AI Categorie",   icon="🏷️"),
+        st.Page(
+            "pages/sd_configurazione_categorie.py",
+            title="Mappatura Categorie",
+            icon="🗂️",
+        ),
         st.Page("pages/sd_configurazione.py", title="Configurazione", icon="⚙️"),
     ],
     "💰 Vendite": [

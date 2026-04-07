@@ -91,6 +91,16 @@ class PulsewayClient:
         logger.success(f"Download completato: {len(all_tickets)} ticket.")
         return all_tickets
 
+    def get_issue_types(self) -> list[dict]:
+        """Scarica tutte le categorie (IssueType) da Pulseway."""
+        data = self._get("/v2/servicedesk/issuetypes/lookup")
+        return data.get("result", [])
+
+    def get_sub_issue_types(self) -> list[dict]:
+        """Scarica tutte le sottocategorie da Pulseway."""
+        data = self._get("/v2/servicedesk/subissuetypes/lookup")
+        return data.get("result", [])
+
     # ------------------------------------------------------------------
     # CONTATTI — usato dal voicebot
     # ------------------------------------------------------------------

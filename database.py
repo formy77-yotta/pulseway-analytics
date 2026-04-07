@@ -122,12 +122,28 @@ CREATE INDEX IF NOT EXISTS idx_tickets_completed   ON tickets(completed_date);
 CREATE INDEX IF NOT EXISTS idx_tickets_priority    ON tickets(priority_name);
 """
 
+CREATE_CATEGORY_MAPPING = """
+CREATE TABLE IF NOT EXISTS category_mapping (
+    id                  SERIAL PRIMARY KEY,
+    pulseway_category   TEXT NOT NULL,
+    pulseway_sub        TEXT NOT NULL DEFAULT '',
+    ai_category         TEXT,
+    ai_subcategory      TEXT,
+    is_equivalent       BOOLEAN DEFAULT TRUE,
+    note                TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(pulseway_category, pulseway_sub)
+);
+"""
+
 
 def init_db():
     """Crea le tabelle se non esistono."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(CREATE_TABLES)
+            cur.execute(CREATE_CATEGORY_MAPPING)
     logger.success("Database PostgreSQL inizializzato.")
 
 

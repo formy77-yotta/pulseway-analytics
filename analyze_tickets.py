@@ -20,6 +20,8 @@ import psycopg2.extras
 from google import genai
 from google.genai import types
 from config import DATABASE_URL, GEMINI_API_KEY
+from ai_categories_constants import CATEGORIE
+from database import CREATE_CATEGORY_MAPPING
 
 # ------------------------------------------------------------------
 # CONFIGURAZIONE
@@ -28,25 +30,6 @@ from config import DATABASE_URL, GEMINI_API_KEY
 GEMINI_MODEL  = "gemini-3.1-flash-lite-preview"
 BATCH_SIZE    = 15    # ticket per chiamata API
 SLEEP_BETWEEN = 2.0   # secondi tra chiamate (rate limiting)
-
-# Categorie standard per i ticket IT
-CATEGORIE = [
-    "Hardware",
-    "Software",
-    "Network",
-    "Office365",
-    "Security",
-    "Email",
-    "Backup",
-    "Server",
-    "Postazione",
-    "Stampante",
-    "Firewall",
-    "VPN",
-    "Account/Accessi",
-    "Monitoraggio",
-    "Altro",
-]
 
 # ------------------------------------------------------------------
 # CONNESSIONE DB
@@ -125,8 +108,108 @@ def init_ai_tables():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(CREATE_AI_TABLES)
+            cur.execute(CREATE_CATEGORY_MAPPING)
         conn.commit()
     logger.success("Tabelle AI inizializzate.")
+
+
+def load_category_mapping() -> list[dict]:
+    """Carica mappatura Pulseway → AI da PostgreSQL."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT pulseway_category, pulseway_sub, ai_category, ai_subcategory,
+                       is_equivalent, note
+                FROM category_mapping
+                ORDER BY pulseway_category, pulseway_sub
+                """
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+
+def format_mapping_for_prompt(rows: list[dict]) -> str:
+    lines: list[str] = []
+    for r in rows:
+        ac = r.get("ai_category")
+        if not ac:
+            continue
+        pc = (r.get("pulseway_category") or "").strip()
+        ps = (r.get("pulseway_sub") or "").strip()
+        asc = (r.get("ai_subcategory") or "").strip()
+        eq = "sì" if r.get("is_equivalent") else "no"
+        extra = f" / AI sub: {asc}" if asc else ""
+        lines.append(
+            f"- Operatore [{pc}] + sottocategoria [{ps}] → AI [{ac}]{extra} (equivalente: {eq})"
+        )
+    if not lines:
+        return "(nessuna riga con ai_category valorizzata — configura la tabella category_mapping)"
+    return "\n".join(lines)
+
+
+def _norm(s) -> str:
+    if s is None:
+        return ""
+    return str(s).strip()
+
+
+def resolve_category_match(
+    categoria_op: str,
+    sub_op: str,
+    ai_cat: str,
+    mapping_rows: list[dict],
+) -> bool:
+    """
+    True se esiste una riga con is_equivalent=TRUE la cui categoria AI attesa
+    coincide con ai_cat per la coppia (categoria_operatore, sottocategoria).
+    """
+    categoria_op = _norm(categoria_op)
+    sub_op = _norm(sub_op)
+    ai_cat = _norm(ai_cat)
+    if not ai_cat:
+        return False
+    for r in mapping_rows:
+        if not r.get("is_equivalent"):
+            continue
+        ac_map = _norm(r.get("ai_category"))
+        if not ac_map:
+            continue
+        pc = _norm(r.get("pulseway_category"))
+        ps = _norm(r.get("pulseway_sub") or "")
+        if pc != categoria_op:
+            continue
+        if ps and ps != sub_op:
+            continue
+        if ac_map == ai_cat:
+            return True
+    return False
+
+
+def apply_mapping_to_results(
+    results: list[dict],
+    batch_tickets: list[dict],
+    mapping_rows: list[dict],
+) -> None:
+    active = [
+        r
+        for r in mapping_rows
+        if r.get("is_equivalent") and _norm(r.get("ai_category"))
+    ]
+    if not active:
+        return
+    by_id = {t["id"]: t for t in batch_tickets}
+    for r in results:
+        tid = r.get("id")
+        if tid is None:
+            continue
+        t = by_id.get(tid)
+        if not t:
+            continue
+        op_cat = t.get("categoria_operatore") or t.get("issue_type_name")
+        op_sub = t.get("subcategoria_operatore") or t.get("sub_issue_type_name")
+        r["category_match"] = resolve_category_match(
+            op_cat, op_sub or "", r.get("ai_category"), active
+        )
 
 
 # ------------------------------------------------------------------
@@ -210,15 +293,16 @@ def clean_text(text: str, max_chars: int = 500) -> str:
 def prepare_ticket_text(ticket: dict) -> dict:
     """Prepara il testo del ticket per l'analisi."""
     return {
-        "id":                   ticket["id"],
-        "titolo":               clean_text(ticket.get("title", ""), 200),
-        "descrizione":          clean_text(ticket.get("details", ""), 300),
-        "note":                 clean_text(ticket.get("note_testo", ""), 500),
-        "categoria_operatore":  ticket.get("categoria_operatore", ""),
-        "stato":                ticket.get("status_name", ""),
-        "priorita":             ticket.get("priority_name", ""),
-        "cliente":              ticket.get("account_name", ""),
-        "chiuso":               ticket.get("completed_date") is not None,
+        "id":                     ticket["id"],
+        "titolo":                 clean_text(ticket.get("title", ""), 200),
+        "descrizione":            clean_text(ticket.get("details", ""), 300),
+        "note":                   clean_text(ticket.get("note_testo", ""), 500),
+        "categoria_operatore":    ticket.get("categoria_operatore", ""),
+        "sottocategoria_operatore": ticket.get("subcategoria_operatore", "") or "",
+        "stato":                  ticket.get("status_name", ""),
+        "priorita":               ticket.get("priority_name", ""),
+        "cliente":                ticket.get("account_name", ""),
+        "chiuso":                 ticket.get("completed_date") is not None,
     }
 
 
@@ -226,18 +310,22 @@ def prepare_ticket_text(ticket: dict) -> dict:
 # PROMPT GEMINI
 # ------------------------------------------------------------------
 
-SYSTEM_PROMPT = f"""
+def build_system_prompt(mappatura_str: str) -> str:
+    return f"""
 Sei un analista esperto di IT service desk. Analizzi ticket di supporto tecnico
 di una società MSP (Managed Service Provider) italiana chiamata Yotta Core.
 
 Categorie disponibili: {', '.join(CATEGORIE)}
+
+MAPPATURA CATEGORIE OPERATORI → AI:
+{mappatura_str}
 
 Per ogni ticket restituisci SOLO un oggetto JSON valido con questi campi:
 - id: (intero, id del ticket)
 - ai_category: (stringa, una delle categorie disponibili)
 - ai_subcategory: (stringa, sottocategoria specifica es. "RAM guasta", "Password scaduta")
 - ai_confidence: (float 0.0-1.0, certezza della categorizzazione)
-- category_match: (boolean, true se la categoria AI coincide con quella dell'operatore)
+- category_match: (boolean, stima preliminare; verrà ricalcolata dopo in base alla mappatura ufficiale)
 - category_note: (stringa, breve spiegazione se diversa, altrimenti null)
 - ai_root_cause: (stringa, causa radice in max 10 parole)
 - ai_is_recurring: (boolean, sembra un problema ricorrente?)
@@ -264,6 +352,7 @@ def build_user_prompt(batch: list[dict]) -> str:
             f"Descr: {t['descrizione']} | "
             f"Note: {t['note']} | "
             f"Cat.operatore: {t['categoria_operatore']} | "
+            f"Sub.operatore: {t.get('sottocategoria_operatore', '')} | "
             f"Stato: {t['stato']} | "
             f"Chiuso: {t['chiuso']}"
         )
@@ -279,7 +368,13 @@ def build_user_prompt(batch: list[dict]) -> str:
 # CHIAMATA GEMINI
 # ------------------------------------------------------------------
 
-def analyze_batch(client, batch: list[dict], dry_run: bool = False) -> tuple[list[dict], int, int]:
+def analyze_batch(
+    client,
+    batch: list[dict],
+    system_instruction: str,
+    mapping_rows: list[dict],
+    dry_run: bool = False,
+) -> tuple[list[dict], int, int]:
     """
     Invia un batch a Gemini e restituisce (risultati, token_input, token_output).
     """
@@ -295,7 +390,7 @@ def analyze_batch(client, batch: list[dict], dry_run: bool = False) -> tuple[lis
             model=GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system_instruction,
                 temperature=0.1,
                 response_mime_type="application/json",
             ),
@@ -309,6 +404,7 @@ def analyze_batch(client, batch: list[dict], dry_run: bool = False) -> tuple[lis
         raw_text = raw_text.strip()
 
         results = json.loads(raw_text)
+        apply_mapping_to_results(results, batch, mapping_rows)
 
         tok_in  = response.usage_metadata.prompt_token_count if response.usage_metadata else 0
         tok_out = response.usage_metadata.candidates_token_count if response.usage_metadata else 0
@@ -415,6 +511,10 @@ def analyze(days: int = None, force: bool = False, dry_run: bool = False):
     # Client Gemini (google.genai)
     client = genai.Client(api_key=GEMINI_API_KEY)
 
+    mapping_rows = load_category_mapping()
+    mappatura_str = format_mapping_for_prompt(mapping_rows)
+    system_instruction = build_system_prompt(mappatura_str)
+
     # Carica ticket
     tickets = get_tickets_to_analyze(days=days, force=force)
     logger.info(f"Ticket da analizzare: {len(tickets)}")
@@ -447,7 +547,9 @@ def analyze(days: int = None, force: bool = False, dry_run: bool = False):
     for i, batch in enumerate(batches):
         logger.info(f"Batch {i+1}/{len(batches)} ({len(batch)} ticket)...")
 
-        results, tok_in, tok_out = analyze_batch(client, batch, dry_run=dry_run)
+        results, tok_in, tok_out = analyze_batch(
+            client, batch, system_instruction, mapping_rows, dry_run=dry_run
+        )
 
         if results and not dry_run:
             save_results(results, GEMINI_MODEL, tok_in, tok_out)
