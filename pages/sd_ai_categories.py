@@ -245,6 +245,7 @@ else:
         [
             "ticket_number",
             "open_date",
+            "account_name",
             "title",
             "issue_type_name",
             "ai_category",
@@ -254,6 +255,7 @@ else:
         ]
     ].rename(
         columns={
+            "account_name": "cliente",
             "issue_type_name": "categoria_operatore",
             "ai_category": "categoria_AI",
         }
