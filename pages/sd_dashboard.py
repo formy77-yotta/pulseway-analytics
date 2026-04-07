@@ -7,6 +7,7 @@ import streamlit as st
 import plotly.express as px
 from sqlalchemy import create_engine
 from config import DATABASE_URL, DASHBOARD_PASSWORD, ANTHROPIC_API_KEY
+from queue_ticket_filter import load_queue_config_dataframe, sql_tickets_filtered
 
 st.title("🎫 Pulseway PSA — Analisi Ticket")
 
@@ -15,9 +16,18 @@ st.title("🎫 Pulseway PSA — Analisi Ticket")
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300)
+def load_queue_config_sidebar() -> pd.DataFrame:
+    engine = create_engine(DATABASE_URL)
+    return load_queue_config_dataframe(engine)
+
+
+@st.cache_data(ttl=300)
 def load_tickets() -> pd.DataFrame:
     engine = create_engine(DATABASE_URL)
-    df = pd.read_sql("SELECT * FROM tickets", engine)
+    try:
+        df = pd.read_sql(sql_tickets_filtered(), engine)
+    except Exception:
+        df = pd.read_sql("SELECT * FROM tickets", engine)
 
     date_cols = [
         "open_date", "completed_date", "due_date",
@@ -56,6 +66,11 @@ if df.empty:
 # SIDEBAR — Filtri
 # ------------------------------------------------------------------
 st.sidebar.header("🔍 Filtri")
+
+df_queue = load_queue_config_sidebar()
+code_escluse = df_queue[df_queue["includi_analisi"] == False]["queue_name"].astype(str).tolist()  # noqa: E712
+if code_escluse:
+    st.sidebar.caption(f"⚠️ Code escluse: {', '.join(code_escluse)}")
 
 min_date = df["open_date"].min().date()
 max_date = df["open_date"].max().date()

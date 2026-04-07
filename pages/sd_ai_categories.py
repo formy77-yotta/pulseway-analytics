@@ -11,6 +11,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sqlalchemy import create_engine, text
 from config import DATABASE_URL
+from queue_ticket_filter import (
+    load_queue_config_dataframe,
+    sql_ai_categories_join_filtered,
+    sql_ai_categories_join_unfiltered,
+)
 
 
 # ------------------------------------------------------------------
@@ -18,40 +23,18 @@ from config import DATABASE_URL
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300)
+def load_queue_config_sidebar() -> pd.DataFrame:
+    engine = create_engine(DATABASE_URL)
+    return load_queue_config_dataframe(engine)
+
+
+@st.cache_data(ttl=300)
 def load_ai_ticket_data() -> pd.DataFrame:
     engine = create_engine(DATABASE_URL)
-    q = """
-    SELECT
-        t.id,
-        t.ticket_number,
-        t.title,
-        t.account_name,
-        t.assignee_name,
-        t.issue_type_name,
-        t.status_name,
-        t.priority_name,
-        t.open_date,
-        t.completed_date,
-        ai.ai_category,
-        ai.ai_subcategory,
-        ai.ai_confidence,
-        ai.category_match,
-        ai.category_note,
-        ai.ai_root_cause,
-        ai.ai_is_recurring,
-        ai.ai_pattern_tags,
-        ai.ai_urgency_score,
-        ai.ai_resolution_quality,
-        ai.ai_communication_quality,
-        ai.ai_resolution_clear,
-        ai.ai_quality_notes,
-        ai.ai_summary,
-        ai.ai_suggested_action,
-        ai.analyzed_at
-    FROM tickets_ai ai
-    INNER JOIN tickets t ON t.id = ai.ticket_id
-    """
-    df = pd.read_sql(q, engine)
+    try:
+        df = pd.read_sql(sql_ai_categories_join_filtered(), engine)
+    except Exception:
+        df = pd.read_sql(sql_ai_categories_join_unfiltered(), engine)
     for col in ("open_date", "completed_date", "analyzed_at"):
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
@@ -118,6 +101,11 @@ if df_all.empty:
 # Sidebar — Filtri globali
 # ------------------------------------------------------------------
 st.sidebar.header("🔍 Filtri")
+
+df_queue = load_queue_config_sidebar()
+code_escluse = df_queue[df_queue["includi_analisi"] == False]["queue_name"].astype(str).tolist()  # noqa: E712
+if code_escluse:
+    st.sidebar.caption(f"⚠️ Code escluse: {', '.join(code_escluse)}")
 
 min_d = df_all["open_date"].min()
 max_d = df_all["open_date"].max()

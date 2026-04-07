@@ -97,6 +97,14 @@ except Exception as e:
     st.stop()
 
 # ------------------------------------------------------------------
+# Sidebar — info (nessun filtro sui dati della pagina)
+# ------------------------------------------------------------------
+st.sidebar.header("ℹ️ Code")
+code_escluse = df_config[df_config["includi_analisi"] == False]["queue_name"].astype(str).tolist()  # noqa: E712
+if code_escluse:
+    st.sidebar.caption(f"⚠️ Code escluse dalle dashboard ticket: {', '.join(code_escluse)}")
+
+# ------------------------------------------------------------------
 # Legenda
 # ------------------------------------------------------------------
 with st.expander("ℹ️ Come funziona", expanded=False):
