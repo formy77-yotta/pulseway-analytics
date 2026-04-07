@@ -2,18 +2,23 @@
 analyze_tickets.py — Analisi AI ticket con Google Gemini
 Categorizzazione, rilevamento pattern, qualità assistenza.
 
+Contesto sistemico e storico (mappatura, pattern, alert) è cachato via Gemini Context Cache
+per ridurre token inviati a ogni run; la cache ha TTL 7 giorni e può essere ricreata con
+--reset-cache (es. cron domenicale su Railway: 0 5 * * 0).
+
 Esegui:
     python analyze_tickets.py              # non analizzati o con note più recenti dell'ultima analisi
     python analyze_tickets.py --days 7     # solo ticket degli ultimi 7 giorni
     python analyze_tickets.py --force      # rianalizza tutto
     python analyze_tickets.py --dry-run    # test senza salvare
+    python analyze_tickets.py --reset-cache  # invalida cache; ricreazione al prossimo run non dry-run
 """
 
 import re
 import json
 import time
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from loguru import logger
 import psycopg2
 import psycopg2.extras
@@ -102,6 +107,16 @@ CREATE TABLE IF NOT EXISTS ai_analysis_log (
     cost_estimate   FLOAT,
     model_used      TEXT,
     errors          INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS gemini_cache_registry (
+    id              SERIAL PRIMARY KEY,
+    cache_name      TEXT NOT NULL,
+    model           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    expires_at      TIMESTAMPTZ,
+    token_count     INTEGER,
+    is_active       BOOLEAN DEFAULT TRUE
 );
 """
 
@@ -329,16 +344,17 @@ def prepare_ticket_text(ticket: dict) -> dict:
 # PROMPT GEMINI
 # ------------------------------------------------------------------
 
-def build_system_prompt(mappatura_str: str) -> str:
+def _system_prompt_head() -> str:
     return f"""
 Sei un analista esperto di IT service desk. Analizzi ticket di supporto tecnico
 di una società MSP (Managed Service Provider) italiana chiamata Yotta Core.
 
 Categorie disponibili: {', '.join(CATEGORIE)}
+""".strip()
 
-MAPPATURA CATEGORIE OPERATORI → AI:
-{mappatura_str}
 
+def _system_prompt_tail() -> str:
+    return """
 Per ogni ticket restituisci SOLO un oggetto JSON valido con questi campi:
 - id: (intero, id del ticket)
 - ai_category: (stringa, una delle categorie disponibili)
@@ -405,7 +421,184 @@ Oltre alla categorizzazione, per ogni ticket analizza e aggiungi questi campi al
 
 Rispondi SOLO con un array JSON: [{{...}}, {{...}}]
 Nessun testo prima o dopo. JSON valido e completo.
-"""
+""".strip()
+
+
+def build_historical_context() -> str:
+    """
+    Costruisce il contesto storico da cachare:
+    - Pattern ricorrenti per cliente
+    - Mappatura categorie Pulseway → AI
+    - Statistiche generali / alert sicurezza recenti
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    t.account_name,
+                    ai.ai_category,
+                    COUNT(*) as n,
+                    MODE() WITHIN GROUP (ORDER BY ai.ai_root_cause) as causa_comune
+                FROM tickets_ai ai
+                JOIN tickets t ON t.id = ai.ticket_id
+                WHERE ai.ai_is_recurring = TRUE
+                  AND t.open_date >= NOW() - INTERVAL '6 months'
+                GROUP BY t.account_name, ai.ai_category
+                HAVING COUNT(*) >= 2
+                ORDER BY n DESC
+                LIMIT 50
+            """)
+            ricorrenti = cur.fetchall()
+
+            cur.execute("""
+                SELECT pulseway_category, pulseway_sub,
+                       ai_category, is_equivalent
+                FROM category_mapping
+                WHERE ai_category IS NOT NULL
+                ORDER BY pulseway_category
+            """)
+            mapping = cur.fetchall()
+
+            cur.execute("""
+                SELECT t.account_name, t.title, ai.security_issues
+                FROM tickets_ai ai
+                JOIN tickets t ON t.id = ai.ticket_id
+                WHERE ai.has_sensitive_data = TRUE
+                  AND t.open_date >= NOW() - INTERVAL '30 days'
+                LIMIT 10
+            """)
+            security = cur.fetchall()
+
+    ctx: list[str] = []
+
+    ctx.append("=== MAPPATURA CATEGORIE PULSEWAY → AI ===")
+    if mapping:
+        for m in mapping:
+            equiv = "EQUIVALENTE" if m[3] else "DIVERSA"
+            sub = f" / {m[1]}" if m[1] else ""
+            ctx.append(f"- '{m[0]}{sub}' → '{m[2]}' ({equiv})")
+    else:
+        ctx.append("(nessuna mappatura configurata)")
+
+    ctx.append("\n=== PATTERN RICORRENTI ULTIMI 6 MESI ===")
+    if ricorrenti:
+        for r in ricorrenti:
+            ctx.append(
+                f"- Cliente '{r[0]}': {r[2]}x categoria '{r[1]}'"
+                f"{f', causa: {r[3]}' if r[3] else ''}"
+            )
+    else:
+        ctx.append("(nessun pattern ricorrente identificato)")
+
+    ctx.append("\n=== ALERT SICUREZZA RECENTI ===")
+    if security:
+        for s in security:
+            issues = s[2]
+            if issues is None:
+                issues_s = "(nessun dettaglio)"
+            elif isinstance(issues, list):
+                issues_s = ", ".join(str(x) for x in issues)
+            else:
+                issues_s = str(issues)
+            ctx.append(f"- Cliente '{s[0]}': '{s[1]}' — {issues_s}")
+    else:
+        ctx.append("(nessun alert sicurezza recente)")
+
+    return "\n".join(ctx)
+
+
+def build_system_prompt(mappatura_str: str) -> str:
+    return (
+        _system_prompt_head()
+        + "\n\nMAPPATURA CATEGORIE OPERATORI → AI:\n"
+        + mappatura_str
+        + "\n\n"
+        + _system_prompt_tail()
+    )
+
+
+def build_system_instruction_for_cache() -> str:
+    """Istruzioni complete per la context cache: storico DB + schema risposta."""
+    return (
+        _system_prompt_head()
+        + "\n\n"
+        + build_historical_context()
+        + "\n\n"
+        + _system_prompt_tail()
+    )
+
+
+def invalidate_cache() -> None:
+    """Forza ricreazione cache alla prossima run."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE gemini_cache_registry SET is_active = FALSE"
+            )
+        conn.commit()
+    logger.info("Cache invalidata — verrà ricreata alla prossima run.")
+
+
+def get_or_create_cache(client: genai.Client) -> str:
+    """
+    Restituisce il nome della cache attiva.
+    Crea una nuova cache se non esiste o è scaduta.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT cache_name, expires_at
+                FROM gemini_cache_registry
+                WHERE is_active = TRUE
+                  AND expires_at > NOW()
+                ORDER BY created_at DESC
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+
+    if row:
+        logger.info(f"Cache esistente: {row[0]} (scade: {row[1]})")
+        return row[0]
+
+    logger.info("Creo nuova context cache Gemini...")
+    system_instruction = build_system_instruction_for_cache()
+
+    cache = client.caches.create(
+        model=GEMINI_MODEL,
+        config=types.CreateCachedContentConfig(
+            system_instruction=system_instruction,
+            ttl="604800s",
+        ),
+    )
+
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    tok = 0
+    if cache.usage_metadata:
+        tok = cache.usage_metadata.total_token_count or 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE gemini_cache_registry SET is_active = FALSE"
+            )
+            cur.execute("""
+                INSERT INTO gemini_cache_registry
+                    (cache_name, model, expires_at,
+                     token_count, is_active)
+                VALUES (%s, %s, %s, %s, TRUE)
+            """, (
+                cache.name,
+                GEMINI_MODEL,
+                expires,
+                tok,
+            ))
+        conn.commit()
+
+    logger.success(
+        f"Cache creata: {cache.name} | Token cachati: "
+        f"{tok if tok else 'N/D'}"
+    )
+    return cache.name
 
 
 def build_user_prompt(batch: list[dict]) -> str:
@@ -435,34 +628,55 @@ def build_user_prompt(batch: list[dict]) -> str:
 
 def analyze_batch(
     client,
+    cache_name: str | None,
     batch: list[dict],
-    system_instruction: str,
     mapping_rows: list[dict],
+    system_instruction: str | None = None,
     dry_run: bool = False,
 ) -> tuple[list[dict], int, int]:
     """
     Invia un batch a Gemini e restituisce (risultati, token_input, token_output).
+
+    Con cache_name valorizzato usa la Context Cache (system_instruction già in cache).
+    Senza cache pass system_instruction (prompt completo con mappatura live).
     """
     prepared = [prepare_ticket_text(t) for t in batch]
     prompt   = build_user_prompt(prepared)
 
     if dry_run:
-        logger.info(f"  [DRY RUN] Batch di {len(batch)} ticket — prompt di {len(prompt)} chars")
+        logger.info(
+            f"  [DRY RUN] Batch {len(batch)} ticket — {len(prompt)} chars"
+        )
         return [], len(prompt) // 4, 0
 
+    raw_text = ""
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.1,
-                response_mime_type="application/json",
-            ),
-        )
-        raw_text = response.text.strip()
+        if cache_name:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    cached_content=cache_name,
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                ),
+            )
+        else:
+            if not system_instruction:
+                system_instruction = build_system_prompt(
+                    format_mapping_for_prompt(mapping_rows)
+                )
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                ),
+            )
 
-        # Rimuovi eventuali markdown code blocks
+        raw_text = response.text.strip()
         raw_text = re.sub(r'^```json\s*', '', raw_text)
         raw_text = re.sub(r'^```\s*',     '', raw_text)
         raw_text = re.sub(r'\s*```$',     '', raw_text)
@@ -607,17 +821,30 @@ def save_results(results: list[dict], model_name: str, tok_in: int, tok_out: int
 # MAIN
 # ------------------------------------------------------------------
 
-def analyze(days: int = None, force: bool = False, dry_run: bool = False):
+def analyze(
+    days: int | None = None,
+    force: bool = False,
+    dry_run: bool = False,
+    reset_cache: bool = False,
+):
     init_ai_tables()
 
-    # Client Gemini (google.genai)
     client = genai.Client(api_key=GEMINI_API_KEY)
+
+    if reset_cache:
+        invalidate_cache()
 
     mapping_rows = load_category_mapping()
     mappatura_str = format_mapping_for_prompt(mapping_rows)
-    system_instruction = build_system_prompt(mappatura_str)
+    system_instruction_fallback = build_system_prompt(mappatura_str)
 
-    # Carica ticket
+    cache_name: str | None = None
+    if not dry_run:
+        try:
+            cache_name = get_or_create_cache(client)
+        except Exception as e:
+            logger.warning(f"Cache non disponibile, procedo senza: {e}")
+
     tickets = get_tickets_to_analyze(days=days, force=force)
     logger.info(f"Ticket da analizzare: {len(tickets)}")
 
@@ -625,32 +852,33 @@ def analyze(days: int = None, force: bool = False, dry_run: bool = False):
         logger.info("Nessun ticket da analizzare.")
         return
 
-    # Stima costo
-    avg_chars   = 600
-    est_tokens  = len(tickets) * avg_chars // 4
-    est_cost    = est_tokens / 1_000_000 * 0.25  # $0.25/MTok Gemini 3.1 Flash Lite
-    logger.info(f"Stima token: ~{est_tokens:,} | Stima costo: ~${est_cost:.4f}")
+    est_tokens = len(tickets) * 600 // 4
+    est_cost = est_tokens / 1_000_000 * 0.25
+    logger.info(
+        f"Stima token: ~{est_tokens:,} | Stima costo: ~${est_cost:.4f} "
+        f"({'con cache' if cache_name else 'senza cache'})"
+    )
 
-    if not dry_run:
-        confirm = input(f"\nProcedere con l'analisi di {len(tickets)} ticket? (s/n): ")
-        if confirm.lower() != 's':
-            logger.info("Analisi annullata.")
-            return
+    batches = [
+        tickets[i : i + BATCH_SIZE]
+        for i in range(0, len(tickets), BATCH_SIZE)
+    ]
 
-    # Suddividi in batch
-    batches = [tickets[i:i+BATCH_SIZE] for i in range(0, len(tickets), BATCH_SIZE)]
-    logger.info(f"Batch da elaborare: {len(batches)} (da {BATCH_SIZE} ticket ciascuno)")
-
-    total_analyzed  = 0
-    total_tok_in    = 0
-    total_tok_out   = 0
-    total_errors    = 0
+    total_analyzed = 0
+    total_tok_in = 0
+    total_tok_out = 0
+    errors = 0
 
     for i, batch in enumerate(batches):
-        logger.info(f"Batch {i+1}/{len(batches)} ({len(batch)} ticket)...")
+        logger.info(f"Batch {i + 1}/{len(batches)}...")
 
         results, tok_in, tok_out = analyze_batch(
-            client, batch, system_instruction, mapping_rows, dry_run=dry_run
+            client,
+            cache_name,
+            batch,
+            mapping_rows,
+            system_instruction=system_instruction_fallback if not cache_name else None,
+            dry_run=dry_run,
         )
 
         if results and not dry_run:
@@ -659,29 +887,29 @@ def analyze(days: int = None, force: bool = False, dry_run: bool = False):
         elif dry_run:
             total_analyzed += len(batch)
 
-        total_tok_in  += tok_in
+        total_tok_in += tok_in
         total_tok_out += tok_out
-
         if not results and not dry_run:
-            total_errors += 1
+            errors += 1
 
-        # Rate limiting
         if i < len(batches) - 1:
             time.sleep(SLEEP_BETWEEN)
 
-    # Costo reale
-    real_cost = (total_tok_in / 1_000_000 * 0.25) + (total_tok_out / 1_000_000 * 1.50)
+    real_cost = (
+        (total_tok_in / 1_000_000 * 0.25)
+        + (total_tok_out / 1_000_000 * 1.50)
+    )
 
     logger.success(
         f"\n✅ Analisi completata!\n"
-        f"  Ticket analizzati: {total_analyzed}\n"
-        f"  Token input:       {total_tok_in:,}\n"
-        f"  Token output:      {total_tok_out:,}\n"
-        f"  Costo reale:       ${real_cost:.4f}\n"
-        f"  Errori batch:      {total_errors}"
+        f"  Ticket: {total_analyzed}\n"
+        f"  Token input: {total_tok_in:,}\n"
+        f"  Token output: {total_tok_out:,}\n"
+        f"  Costo: ${real_cost:.4f}\n"
+        f"  Cache: {cache_name or 'non usata'}\n"
+        f"  Errori: {errors}"
     )
 
-    # Salva log
     if not dry_run:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -690,8 +918,14 @@ def analyze(days: int = None, force: bool = False, dry_run: bool = False):
                         (tickets_analyzed, tokens_input, tokens_output,
                          cost_estimate, model_used, errors)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (total_analyzed, total_tok_in, total_tok_out,
-                      real_cost, GEMINI_MODEL, total_errors))
+                """, (
+                    total_analyzed,
+                    total_tok_in,
+                    total_tok_out,
+                    real_cost,
+                    GEMINI_MODEL,
+                    errors,
+                ))
             conn.commit()
 
 
@@ -709,6 +943,16 @@ if __name__ == "__main__":
                         help="Rianalizza anche ticket già analizzati")
     parser.add_argument("--dry-run", action="store_true",
                         help="Test senza chiamare Gemini né salvare")
+    parser.add_argument(
+        "--reset-cache",
+        action="store_true",
+        help="Forza ricreazione della context cache",
+    )
     args = parser.parse_args()
 
-    analyze(days=args.days, force=args.force, dry_run=args.dry_run)
+    analyze(
+        days=args.days,
+        force=args.force,
+        dry_run=args.dry_run,
+        reset_cache=args.reset_cache,
+    )
