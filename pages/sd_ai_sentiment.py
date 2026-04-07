@@ -99,6 +99,45 @@ else:
 if "has_sensitive_data" not in f.columns:
     f["has_sensitive_data"] = False
 
+
+def _build_discrepanze_table_df(
+    disc_view: pd.DataFrame, solo_discrepanze: bool
+) -> pd.DataFrame:
+    rows: list[dict] = []
+    for _, row in disc_view.iterrows():
+        od = row.get("open_date")
+        if pd.notna(od):
+            od_dt = pd.to_datetime(od, utc=True, errors="coerce")
+        else:
+            od_dt = pd.NaT
+        conf = row.get("ai_confidence")
+        cm = row.get("category_match")
+        if pd.isna(cm):
+            match_s = "—"
+        elif bool(cm):
+            match_s = "✅"
+        else:
+            match_s = "⚠️"
+        title_s = str(row.get("title") or "")[:50]
+        if solo_discrepanze and pd.notna(conf) and float(conf) > 0.8:
+            title_s = f"🔴 {title_s}"
+        conf_pct = float(conf) * 100.0 if pd.notna(conf) else None
+        rows.append(
+            {
+                "Ticket": row.get("ticket_number") or "",
+                "Apertura": od_dt,
+                "Cliente": str(row.get("account_name") or ""),
+                "Titolo": title_s,
+                "Cat. AI": str(row.get("ai_category") or ""),
+                "Match": match_s,
+                "Alert": alert_level_display(row.get("alert_level")),
+                "Conf. %": conf_pct,
+                "_ticket_id": int(row["id"]),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 st.subheader("🔀 Discrepanze categoria operatore vs AI")
 solo_discrepanze = st.checkbox("Mostra solo discrepanze", value=False)
 
@@ -115,47 +154,56 @@ if disc_view.empty:
         else "Nessun ticket nei filtri correnti."
     )
 else:
-    h = st.columns([0.85, 0.95, 1.0, 1.75, 0.95, 0.45, 0.75, 0.55, 0.35])
-    h[0].markdown("**Ticket**")
-    h[1].markdown("**Apertura**")
-    h[2].markdown("**Cliente**")
-    h[3].markdown("**Titolo**")
-    h[4].markdown("**Cat. AI**")
-    h[5].markdown("**Match**")
-    h[6].markdown("**Alert**")
-    h[7].markdown("**Conf.**")
-    h[8].markdown("**Vedi**")
-
-    for idx, row in disc_view.iterrows():
-        tid = int(row["id"])
-        od = row.get("open_date")
-        if pd.notna(od):
-            od_s = pd.to_datetime(od, utc=True, errors="coerce").strftime("%Y-%m-%d %H:%M")
-        else:
-            od_s = "—"
-        conf = row.get("ai_confidence")
-        conf_s = f"{float(conf):.0%}" if pd.notna(conf) else "—"
-        cm = row.get("category_match")
-        if pd.isna(cm):
-            match_s = "—"
-        elif bool(cm):
-            match_s = "✅"
-        else:
-            match_s = "⚠️"
-        title_s = str(row.get("title") or "")[:50]
-        if solo_discrepanze and pd.notna(conf) and float(conf) > 0.8:
-            title_s = f"🔴 {title_s}"
-
-        al_disp = alert_level_display(row.get("alert_level"))
-
-        cols = st.columns([0.85, 0.95, 1.0, 1.75, 0.95, 0.45, 0.75, 0.55, 0.35])
-        cols[0].write(row.get("ticket_number") or "")
-        cols[1].write(od_s)
-        cols[2].write(str(row.get("account_name") or ""))
-        cols[3].write(title_s)
-        cols[4].write(str(row.get("ai_category") or ""))
-        cols[5].write(match_s)
-        cols[6].markdown(al_disp)
-        cols[7].write(conf_s)
-        if cols[8].button("👁️", key=f"sent_disc_{tid}_{idx}", help="Dettaglio ticket"):
-            show_ticket_detail(tid)
+    display_df = _build_discrepanze_table_df(disc_view, solo_discrepanze).reset_index(drop=True)
+    visible_cols = [
+        "Ticket",
+        "Apertura",
+        "Cliente",
+        "Titolo",
+        "Cat. AI",
+        "Match",
+        "Alert",
+        "Conf. %",
+    ]
+    st.caption(
+        "Tabella interattiva: clicca sull’intestazione di una colonna per ordinare. "
+        "Seleziona una riga e usa il pulsante per aprire il dettaglio."
+    )
+    df_state = st.dataframe(
+        display_df,
+        column_order=visible_cols,
+        column_config={
+            "Ticket": st.column_config.TextColumn("Ticket", width="small"),
+            "Apertura": st.column_config.DatetimeColumn(
+                "Apertura", format="YYYY-MM-DD HH:mm", timezone="UTC"
+            ),
+            "Cliente": st.column_config.TextColumn("Cliente", width="medium"),
+            "Titolo": st.column_config.TextColumn("Titolo", width="large"),
+            "Cat. AI": st.column_config.TextColumn("Cat. AI", width="medium"),
+            "Match": st.column_config.TextColumn("Match", width="small"),
+            "Alert": st.column_config.TextColumn("Alert", width="small"),
+            "Conf. %": st.column_config.NumberColumn(
+                "Conf. %",
+                format="%.0f %%",
+                min_value=0.0,
+                max_value=100.0,
+            ),
+        },
+        use_container_width=True,
+        hide_index=True,
+        height=480,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="sentiment_discrepanze_table",
+    )
+    sel_rows = df_state.selection.rows
+    detail_col1, detail_col2 = st.columns([1, 4])
+    with detail_col1:
+        open_disabled = len(sel_rows) == 0
+        if st.button(
+            "👁️ Dettaglio ticket",
+            disabled=open_disabled,
+            help="Seleziona una riga nella tabella, poi clicca qui.",
+        ):
+            ridx = sel_rows[0]
+            show_ticket_detail(int(display_df.iloc[ridx]["_ticket_id"]))
