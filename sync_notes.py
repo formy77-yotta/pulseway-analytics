@@ -10,6 +10,7 @@ Esegui:
 """
 
 import re
+import html
 import argparse
 from datetime import datetime, timedelta
 from loguru import logger
@@ -75,88 +76,125 @@ def init_db():
 # PULIZIA TESTO
 # ------------------------------------------------------------------
 
-# Pattern testo automatico / firme / antispam da rimuovere
-AUTO_PATTERNS = [
-    r'Ticket has been assigned to\s+.*?\s+by\s+[^<\n]+',
-    r'Ticket status changed.*?(?=\n|$)',
-    r'Ticket priority changed.*?(?=\n|$)',
-    r'Ticket queue changed.*?(?=\n|$)',
-    # Antispam INKY e simili
-    r'Safe\s*Spam\s*Phish\s*More\s*\.{3}\s*FAQ\s*Sicurezza\s*INKY[^\n]*',
-    r'INKY\s*sta\s*verificando\s*\.\.\.',
-    r'Graymail\s*Spam\s*Phish\s*More\s*\.\.\.',
-    r'\[INKY[^\]]*\]',
-    # Firme email tipiche
-    r'(?:Tel|Mob|Cell|Fax|Phone)[\s.:]*[\+\d\s\-\(\)]{7,20}',
-    r'P\.?\s*IVA[\s:]*[\d\s]{11,15}',
-    r'C\.?\s*F\.?[\s:]*[A-Za-z0-9]{16}',
-    r'Via\s+\w+[\s,]+\d+[\s,]+\d{5}',
-    # Separatori di citazione email
-    r'Il giorno .{10,50} ha scritto:',
-    r'On .{10,50} wrote:',
-    # Footer aziendali comuni (tre righe dopo formula di chiusura)
-    r'(?:Cordiali saluti|Distinti saluti|Saluti|Regards|Best regards)[^\n]*\n.*?\n.*?\n',
-]
-
-# Pattern che possono attraversare più righe (disclaimer, blocchi citazione)
-AUTO_PATTERNS_DOTALL = [
-    r'(?:Questo messaggio|This email|La presente email).{0,300}(?:riservatezza|confidential|legge)',
-    r'(?:Se hai ricevuto|If you received).{0,200}(?:eliminare|delete)',
-    r'-{5,}.*?(?:Messaggio originale|Original Message|From:|Da:).*?-{5,}',
-]
-
-
-def clean_html(html: str) -> str:
-    """Rimuove HTML, testo automatico, firme, antispam e normalizza."""
-    if not html:
+def clean_html(raw: str) -> str:
+    """Rimuove HTML, firme, citazioni, INKY, disclaimer, tel/fax/email di rumore."""
+    if not raw:
         return ""
 
-    text = html
+    text = raw
 
-    # Sostituisci <br> e <p> con newline prima di rimuovere i tag
+    # 1. Decodifica entità HTML
+    text = html.unescape(text)
+
+    # 2. Sostituisci tag di blocco con newline
     text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'</p>', '\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'<p[^>]*>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'</?(p|div|tr|li)[^>]*>', '\n', text, flags=re.IGNORECASE)
 
-    # Rimuovi tutti i tag HTML rimanenti
+    # 3. Rimuovi tutti i tag HTML rimanenti
     text = re.sub(r'<[^>]+>', ' ', text)
 
-    # Decodifica entità HTML
-    text = text.replace('&nbsp;', ' ')
-    text = text.replace('&lt;', '<')
-    text = text.replace('&gt;', '>')
-    text = text.replace('&amp;', '&')
-    text = text.replace('&quot;', '"')
-    text = text.replace('&#39;', "'")
+    # 4. Rimuovi testo automatico Pulseway di assegnazione
+    text = re.sub(
+        r'Ticket has been assigned to\s+.+?\s+by\s+.+?(?=\n|$)',
+        '', text, flags=re.IGNORECASE
+    )
 
-    for pattern in AUTO_PATTERNS:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    # 5. Rimuovi antispam INKY (tutte le varianti)
+    text = re.sub(
+        r'(?:Safe\s*)?(?:Spam\s*)?(?:Phish\s*)?(?:Graymail\s*)?'
+        r'More\s*\.{3}\s*FAQ\s*Sicurezza\s*INKY[^\n]*',
+        '', text, flags=re.IGNORECASE
+    )
+    text = re.sub(r'INKY\s+sta\s+verificando[^\n]*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'(?:Safe|Spam|Phish|Graymail)\s+(?:Safe|Spam|Phish|Graymail)[^\n]*',
+                  '', text, flags=re.IGNORECASE)
 
-    for pattern in AUTO_PATTERNS_DOTALL:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
+    # 6. Tronca alla prima citazione/forward trovata
+    # Tutto ciò che viene dopo è il messaggio originale citato
+    cutoff_patterns = [
+        r'\n\s*-{3,}\s*(?:Messaggio originale|Original Message|Forwarded|Inoltrato)',
+        r'\nDa:\s+\S+.*\nInviato:',
+        r'\nFrom:\s+\S+.*\nSent:',
+        r'\nIl giorno .{5,50} ha scritto:',
+        r'\nOn .{5,50} wrote:',
+        r'\n_{5,}',
+        r'\n-{5,}',
+    ]
+    for pattern in cutoff_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            text = text[:match.start()]
 
-    # Normalizza spazi multipli e newline
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = '\n'.join(line.strip() for line in text.split('\n'))
+    # 7. Rimuovi firma email (solo negli ultimi 300 caratteri se il testo è lungo)
+    firma_patterns = [
+        r'\n\s*(?:Cordiali saluti|Distinti saluti|Saluti|Regards|Best regards|Grazie)[^\n]*(?:\n.+){0,5}$',
+        r'\n\s*(?:tel|fax|cell|mob)[\s.:]+[\d\s\/\+\-\(\)]{6,}[^\n]*',
+    ]
+    if len(text) > 300:
+        body = text[:-300]
+        tail = text[-300:]
+        for pattern in firma_patterns:
+            tail = re.sub(pattern, '', tail, flags=re.IGNORECASE)
+        text = body + tail
+    else:
+        for pattern in firma_patterns:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
 
-    # Rimuovi righe troppo corte (probabilmente residui di formattazione)
+    # 8. Rimuovi righe che sono SOLO etichetta + numero (tipico di firma)
+    text = re.sub(
+        r'^\s*(?:tel|fax|cell|mob|telefono|cellulare)[\s.:]+[\+\d\s\-\/\(\)]{6,25}\s*$',
+        '', text, flags=re.IGNORECASE | re.MULTILINE
+    )
+
+    # 9. Rimuovi indirizzi email nelle firme
+    # Mantieni solo email nel corpo del testo (contesto tecnico)
+    # Rimuovi righe che contengono SOLO una email
+    text = re.sub(r'^\s*[\w\.\-]+@[\w\.\-]+\.\w+\s*$', '', text, flags=re.MULTILINE)
+
+    # 10. Rimuovi "Inviato da Outlook/Mail per iOS/Android"
+    text = re.sub(r'Inviato da \w+ per \w+', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'Sent from \w+ for \w+', '', text, flags=re.IGNORECASE)
+
+    # 11. Rimuovi disclaimer legali
+    disclaimer_starts = [
+        'il contenuto di questa',
+        'this email is confidential',
+        'la presente comunicazione',
+        'questo messaggio',
+        'if you received this',
+        'se hai ricevuto questa',
+        'avviso di riservatezza',
+        'confidentiality notice',
+    ]
     lines = text.split('\n')
-    lines = [ln for ln in lines if len(ln.split()) >= 3]
-    text = '\n'.join(lines)
-
-    # Rimuovi righe duplicate (citazioni ripetute)
-    lines = text.split('\n')
-    seen: set[str] = set()
-    unique_lines: list[str] = []
+    clean_lines = []
+    skip = False
     for line in lines:
-        s = line.strip()
-        if s not in seen:
-            seen.add(s)
-            unique_lines.append(line)
-    text = '\n'.join(unique_lines)
+        line_lower = line.strip().lower()
+        if any(line_lower.startswith(d) for d in disclaimer_starts):
+            skip = True
+        if not skip:
+            clean_lines.append(line)
+    text = '\n'.join(clean_lines)
 
+    # 12. Pulizia finale
+    lines = text.split('\n')
+    lines = [l.strip() for l in lines if l.strip()]
+
+    # Rimuovi duplicati consecutivi
+    unique_lines = []
+    prev = None
+    for line in lines:
+        if line != prev:
+            unique_lines.append(line)
+            prev = line
+
+    text = '\n'.join(unique_lines).strip()
+
+    # 13. Normalizza spazi multipli
+    text = re.sub(r'[ \t]{2,}', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
+
     return text.strip()
 
 
