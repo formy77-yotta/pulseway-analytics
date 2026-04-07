@@ -125,7 +125,6 @@ sel_acc = st.sidebar.selectbox("Cliente", accounts)
 techs = ["Tutti"] + sorted(df_all["assignee_name"].dropna().unique().tolist())
 sel_tech = st.sidebar.selectbox("Tecnico", techs)
 
-solo_disc = st.sidebar.checkbox("Solo discrepanze (category_match = false)", value=False)
 solo_rec = st.sidebar.checkbox("Solo ricorrenti", value=False)
 
 
@@ -142,8 +141,6 @@ def apply_sidebar_filters(src: pd.DataFrame) -> pd.DataFrame:
         f = f[f["account_name"] == sel_acc]
     if sel_tech != "Tutti":
         f = f[f["assignee_name"] == sel_tech]
-    if solo_disc:
-        f = f[f["category_match"] == False]  # noqa: E712
     if solo_rec:
         f = f[f["ai_is_recurring"] == True]  # noqa: E712
     return f
@@ -228,17 +225,30 @@ fig_cat.add_trace(
 fig_cat.update_layout(height=420, showlegend=False, margin=dict(t=40, b=20))
 st.plotly_chart(fig_cat, use_container_width=True)
 
-disc = f[f["category_match"] == False].copy()  # noqa: E712
-st.markdown("**Discrepanze (category_match = false)**")
-if disc.empty:
-    st.caption("Nessuna discrepanza nel periodo/filtri correnti.")
+st.markdown("**Discrepanze**")
+solo_discrepanze = st.checkbox("Mostra solo discrepanze", value=False)
+
+disc_base = f.copy()
+if solo_discrepanze:
+    disc_view = disc_base[disc_base["category_match"] == False].copy()  # noqa: E712
 else:
-    show_disc = disc[
+    disc_view = disc_base.copy()
+
+if disc_view.empty:
+    st.caption(
+        "Nessun ticket da mostrare (solo discrepanze: nessuna discrepanza nei filtri correnti)."
+        if solo_discrepanze
+        else "Nessun ticket nei filtri correnti."
+    )
+else:
+    show_disc = disc_view[
         [
             "ticket_number",
+            "open_date",
             "title",
             "issue_type_name",
             "ai_category",
+            "category_match",
             "ai_confidence",
             "category_note",
         ]
@@ -248,6 +258,24 @@ else:
             "ai_category": "categoria_AI",
         }
     )
+    if "open_date" in show_disc.columns:
+        show_disc = show_disc.copy()
+        show_disc["open_date"] = pd.to_datetime(show_disc["open_date"], utc=True, errors="coerce").dt.strftime(
+            "%Y-%m-%d %H:%M"
+        )
+
+    def highlight_match_col(series: pd.Series) -> list[str]:
+        out: list[str] = []
+        for v in series:
+            if pd.isna(v):
+                out.append("")
+            elif v == True:  # noqa: E712
+                out.append("background-color: #c8e6c9")
+            elif v == False:  # noqa: E712
+                out.append("background-color: #ffcdd2")
+            else:
+                out.append("")
+        return out
 
     def highlight_high_conf(row: pd.Series) -> list[str]:
         conf = row["ai_confidence"]
@@ -255,11 +283,12 @@ else:
             return ["background-color: #ffcccc"] * len(row)
         return [""] * len(row)
 
-    st.dataframe(
-        show_disc.style.apply(highlight_high_conf, axis=1),
-        use_container_width=True,
-        hide_index=True,
-    )
+    if solo_discrepanze:
+        styled = show_disc.style.apply(highlight_high_conf, axis=1)
+    else:
+        styled = show_disc.style.apply(highlight_match_col, subset=["category_match"])
+
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 st.divider()
 
