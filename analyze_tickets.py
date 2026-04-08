@@ -8,7 +8,7 @@ per ridurre token inviati a ogni run; la cache ha TTL 7 giorni e può essere ric
 
 Esegui:
     python analyze_tickets.py              # non analizzati o con note più recenti dell'ultima analisi
-    python analyze_tickets.py --days 7     # solo ticket degli ultimi 7 giorni
+    python analyze_tickets.py --days 7     # aperti negli ultimi 7 gg o con nota in quel periodo
     python analyze_tickets.py --force      # rianalizza tutto
     python analyze_tickets.py --dry-run    # test senza salvare
     python analyze_tickets.py --reset-cache  # invalida cache; ricreazione al prossimo run non dry-run
@@ -18,7 +18,7 @@ import re
 import json
 import time
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, timezone
 from loguru import logger
 import psycopg2
 import psycopg2.extras
@@ -243,6 +243,10 @@ def get_tickets_to_analyze(days: int = None, force: bool = False) -> list[dict]:
     - il ticket non è ancora in tickets_ai, oppure
     - esiste almeno una nota con created_on successivo a tickets_ai.analyzed_at.
     Con force=True vengono inclusi tutti i ticket nel filtro data (rianalisi completa).
+
+    Se days è impostato, il filtro data considera i ticket con open_date nella finestra
+    oppure con almeno una riga in ticket_notes con created_on nella stessa finestra
+    (così i case vecchi con attività recente restano in coda con --days).
     """
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -251,9 +255,16 @@ def get_tickets_to_analyze(days: int = None, force: bool = False) -> list[dict]:
             params = []
 
             if days:
-                cutoff = datetime.utcnow() - timedelta(days=days)
-                date_filter = "AND t.open_date >= %s"
-                params.append(cutoff)
+                cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                date_filter = """
+                    AND (
+                        t.open_date >= %s
+                        OR t.id IN (
+                            SELECT ticket_id FROM ticket_notes WHERE created_on >= %s
+                        )
+                    )
+                """
+                params.extend([cutoff, cutoff])
             else:
                 date_filter = "AND t.open_date >= '2026-01-01'"
 
@@ -938,7 +949,7 @@ if __name__ == "__main__":
         description="Analisi AI ticket con Google Gemini"
     )
     parser.add_argument("--days",    type=int, default=None,
-                        help="Analizza solo ticket degli ultimi N giorni")
+                        help="Solo ticket aperti negli ultimi N giorni o con nota creata in quel periodo")
     parser.add_argument("--force",   action="store_true",
                         help="Rianalizza anche ticket già analizzati")
     parser.add_argument("--dry-run", action="store_true",

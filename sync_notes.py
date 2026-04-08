@@ -12,7 +12,7 @@ Esegui:
 import re
 import html
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from loguru import logger
 import psycopg2
 import psycopg2.extras
@@ -206,7 +206,7 @@ def get_tickets_to_sync(days: int = None) -> list[int]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             if days:
-                cutoff = datetime.utcnow() - timedelta(days=days)
+                cutoff = datetime.now(timezone.utc) - timedelta(days=days)
                 cur.execute("""
                     SELECT id FROM tickets
                     WHERE open_date >= '2026-01-01'
